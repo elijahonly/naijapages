@@ -1,0 +1,489 @@
+rules_version = '2';
+
+// =============================================================================
+//  NaijaPages — Firestore security rules
+//
+//  These rules are the REAL security boundary. The website's buttons and the
+//  admin screens only hide things; anyone can talk to Firestore directly, so
+//  every restriction that matters is enforced here.
+//
+//  Roles
+//    admin   → a document exists at /admins/{uid}   (create the first one by hand in the console)
+//    banned  → a document exists at /bans/{uid}     (created by admins from the admin site)
+//    member  → signed in + verified email + not banned (can list, post, review, report, claim)
+//
+//  Keep these in sync with the app:
+//    • isActiveMember()  <-> REQUIRE_VERIFIED_EMAIL in src/lib/config.ts
+//    • field limits      <-> LIMITS                 in src/lib/config.ts
+//    • report reasons    <-> REPORT_REASONS         in src/types/index.ts
+// =============================================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Anything not matched below is closed.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // Helpers
+    // -------------------------------------------------------------------------
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    function isBanned() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/bans/$(request.auth.uid));
+    }
+
+    // To let people post before verifying their email, change this to `return true;`
+    // (and set REQUIRE_VERIFIED_EMAIL = false in src/lib/config.ts).
+    function emailVerified() {
+      return request.auth.token.email_verified == true;
+    }
+
+    function isActiveMember() {
+      return signedIn() && emailVerified() && !isBanned();
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // --- validation primitives ---
+    function str(v, min, max) {
+      return v is string && v.size() >= min && v.size() <= max;
+    }
+
+    function optStr(d, k, max) {
+      return !(k in d) || str(d[k], 0, max);
+    }
+
+    // https only, no whitespace.
+    function httpsUrl(v, max) {
+      return v is string && v.size() <= max && v.matches('^https://[^\\s]+$');
+    }
+
+    function optHttpsUrl(d, k, max) {
+      return !(k in d) || httpsUrl(d[k], max);
+    }
+
+    function optList(d, k, maxLen) {
+      return !(k in d) || (d[k] is list && d[k].size() <= maxLen);
+    }
+
+    function validEmail(v) {
+      return str(v, 5, 150) && v.matches('^[^\\s@/]+@[^\\s@/]+\\.[^\\s@/]+$');
+    }
+
+    function validId(v, max) {
+      return v is string && v.size() <= max && v.matches('^[A-Za-z0-9_-]+$');
+    }
+
+    // Only real Google Maps hosts. A loose "contains google" check would accept google.evil.com.
+    function validMapsUrl(v) {
+      return v is string && v.size() <= 600
+        && v.matches('^https://(maps\\.app\\.goo\\.gl|g\\.page|goo\\.gl|((www|maps)\\.)?google\\.com(\\.ng)?)([/?#][^\\s]*)?$');
+    }
+
+    // -------------------------------------------------------------------------
+    // users: a member's own profile. Admins can read all (for the admin site).
+    // -------------------------------------------------------------------------
+    function validUserProfile(d) {
+      return d.keys().hasAll(['id', 'email'])
+        && d.keys().hasOnly(['id', 'email', 'displayName', 'photoURL', 'createdAt'])
+        && d.id == request.auth.uid
+        && str(d.email, 0, 150)
+        && (!('displayName' in d) || str(d.displayName, 0, 100))
+        && (!('photoURL' in d) || d.photoURL == '' || httpsUrl(d.photoURL, 2500))
+        && (!('createdAt' in d) || str(d.createdAt, 0, 60));
+    }
+
+    match /users/{userId} {
+      allow get: if signedIn() && (request.auth.uid == userId || isAdmin());
+      allow list: if isAdmin();
+      allow create: if signedIn() && request.auth.uid == userId && validUserProfile(incoming());
+      allow update: if signedIn() && request.auth.uid == userId
+        && validUserProfile(incoming())
+        && incoming().get('createdAt', '') == existing().get('createdAt', '');
+      allow delete: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // admins: existence of /admins/{uid} grants admin rights.
+    // The FIRST admin must be created by hand in the Firebase console;
+    // after that, admins can add/remove other admins from the admin site.
+    // -------------------------------------------------------------------------
+    match /admins/{adminId} {
+      allow get: if signedIn() && (request.auth.uid == adminId || isAdmin());
+      allow list: if isAdmin();
+      allow create: if isAdmin()
+        && adminId != request.auth.uid
+        && incoming().keys().hasOnly(['email', 'addedBy', 'addedAt'])
+        && optStr(incoming(), 'email', 150)
+        && incoming().addedBy == request.auth.uid
+        && incoming().addedAt == request.time;
+      allow update: if false;
+      // An admin cannot remove themselves (prevents locking everyone out).
+      allow delete: if isAdmin() && adminId != request.auth.uid;
+    }
+
+    // -------------------------------------------------------------------------
+    // bans: existence of /bans/{uid} suspends that member's posting rights.
+    // Admins cannot be banned (remove their admin role first), nor ban themselves.
+    // -------------------------------------------------------------------------
+    match /bans/{banId} {
+      allow get: if signedIn() && (request.auth.uid == banId || isAdmin());
+      allow list: if isAdmin();
+      allow create: if isAdmin()
+        && banId != request.auth.uid
+        && !exists(/databases/$(database)/documents/admins/$(banId))
+        && incoming().keys().hasOnly(['reason', 'email', 'name', 'bannedBy', 'bannedAt'])
+        && optStr(incoming(), 'reason', 500)
+        && optStr(incoming(), 'email', 150)
+        && optStr(incoming(), 'name', 100)
+        && incoming().bannedBy == request.auth.uid
+        && incoming().bannedAt == request.time;
+      allow update: if false;
+      allow delete: if isAdmin();
+    }
+
+    // -------------------------------------------------------------------------
+    // settings/site: public contact details, announcement, ad-approval switch.
+    // -------------------------------------------------------------------------
+    function validSettings(d) {
+      return d.keys().hasOnly([
+          'contactEmail', 'contactPhone', 'whatsapp', 'address', 'officeHours', 'aboutStory',
+          'announcementEnabled', 'announcementText', 'adsNeedApproval', 'updatedAt', 'updatedBy'
+        ])
+        && optStr(d, 'contactEmail', 150)
+        && optStr(d, 'contactPhone', 40)
+        && optStr(d, 'whatsapp', 40)
+        && optStr(d, 'address', 300)
+        && optStr(d, 'officeHours', 200)
+        && optStr(d, 'aboutStory', 5000)
+        && optStr(d, 'announcementText', 300)
+        && (!('announcementEnabled' in d) || d.announcementEnabled is bool)
+        && (!('adsNeedApproval' in d) || d.adsNeedApproval is bool);
+    }
+
+    match /settings/{docId} {
+      allow get: if true;
+      allow list: if false;
+      allow create, update: if isAdmin() && docId == 'site' && validSettings(incoming());
+      allow delete: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // listing_overrides: admin moderation flags for the BUNDLED directory data
+    // (e.g. hide a built-in business). Public read; contains no private notes.
+    // -------------------------------------------------------------------------
+    match /listing_overrides/{overrideId} {
+      allow get, list: if true;
+      allow create, update: if isAdmin()
+        && incoming().keys().hasOnly(['kind', 'hidden', 'verified', 'claimedBy', 'updatedBy', 'updatedAt'])
+        && incoming().kind in ['business', 'marketplace']
+        && incoming().hidden is bool;
+      allow delete: if isAdmin();
+    }
+
+    // -------------------------------------------------------------------------
+    // businesses: community listings. Members submit them as "pending";
+    // only admins can approve, verify, reject or remove.
+    // -------------------------------------------------------------------------
+    function validSocials(s) {
+      return s is map
+        && s.keys().hasOnly(['instagram', 'twitter', 'facebook', 'linkedin', 'tiktok'])
+        && (!('instagram' in s) || httpsUrl(s.instagram, 200))
+        && (!('twitter' in s) || httpsUrl(s.twitter, 200))
+        && (!('facebook' in s) || httpsUrl(s.facebook, 200))
+        && (!('linkedin' in s) || httpsUrl(s.linkedin, 200))
+        && (!('tiktok' in s) || httpsUrl(s.tiktok, 200));
+    }
+
+    function validBusinessCreate(d) {
+      return d.keys().hasAll([
+          'name', 'category', 'state', 'lga', 'address', 'phone', 'googleMapUrl',
+          'ownerId', 'ownerName', 'status', 'isVerified', 'rating', 'reviewsCount', 'createdAt'
+        ])
+        && d.keys().hasOnly([
+          'name', 'category', 'state', 'lga', 'address', 'phone', 'googleMapUrl',
+          'ownerId', 'ownerName', 'status', 'isVerified', 'rating', 'reviewsCount', 'createdAt',
+          'landmark', 'secondaryPhone', 'whatsapp', 'email', 'website', 'cacStatus', 'cacNumber',
+          'yearEstablished', 'priceLevel', 'paymentMethods', 'socials', 'tags', 'openingHours', 'description'
+        ])
+        // Members can never start out verified, rated, or approved.
+        && d.ownerId == request.auth.uid
+        && d.status == 'pending'
+        && d.isVerified == false
+        && d.rating == 0
+        && d.reviewsCount == 0
+        && d.createdAt == request.time
+        // Required text
+        && str(d.name, 2, 120)
+        && str(d.category, 1, 40)
+        && str(d.state, 2, 40)
+        && str(d.lga, 1, 80)
+        && str(d.address, 3, 250)
+        && str(d.phone, 7, 25)
+        && str(d.ownerName, 0, 100)
+        && validMapsUrl(d.googleMapUrl)
+        // Optional
+        && optStr(d, 'landmark', 120)
+        && optStr(d, 'secondaryPhone', 25)
+        && optStr(d, 'whatsapp', 25)
+        && (!('email' in d) || validEmail(d.email))
+        && optHttpsUrl(d, 'website', 300)
+        && (!('cacStatus' in d) || d.cacStatus in ['registered', 'pending', 'unregistered'])
+        && optStr(d, 'cacNumber', 30)
+        && (!('yearEstablished' in d) || (d.yearEstablished is int && d.yearEstablished >= 1800 && d.yearEstablished <= 2100))
+        && optStr(d, 'priceLevel', 4)
+        && optList(d, 'paymentMethods', 10)
+        && optList(d, 'tags', 15)
+        && optStr(d, 'openingHours', 120)
+        && optStr(d, 'description', 2000)
+        && (!('socials' in d) || validSocials(d.socials));
+    }
+
+    match /businesses/{businessId} {
+      // Everyone sees approved listings; owners see their own (any status); admins see all.
+      // isAdmin() is checked first so an admin can also probe for a document that doesn't exist.
+      allow get, list: if isAdmin()
+        || existing().status == 'approved'
+        || (signedIn() && existing().ownerId == request.auth.uid);
+
+      allow create: if isActiveMember() && validBusinessCreate(incoming());
+
+      // Only admins change a listing (approve / verify / reject / remove / fix details).
+      // Owner and creation date can never be rewritten.
+      allow update: if isAdmin()
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().status in ['pending', 'approved', 'rejected', 'removed'];
+
+      allow delete: if isAdmin() || (signedIn() && existing().ownerId == request.auth.uid);
+    }
+
+    // -------------------------------------------------------------------------
+    // marketplace: community ads. They go live immediately ("active") unless
+    // an admin has switched on "ads need approval" in Settings, in which case
+    // they start as "pending". Members cannot make an ad verified or featured.
+    // -------------------------------------------------------------------------
+    function adInitialStatus() {
+      return (exists(/databases/$(database)/documents/settings/site)
+              && get(/databases/$(database)/documents/settings/site).data.get('adsNeedApproval', false) == true)
+        ? 'pending'
+        : 'active';
+    }
+
+    // An ad may only be linked to a business the poster owns.
+    function linkedBusinessOk(d) {
+      return !('businessId' in d)
+        || (validId(d.businessId, 100)
+            && exists(/databases/$(database)/documents/businesses/$(d.businessId))
+            && get(/databases/$(database)/documents/businesses/$(d.businessId)).data.ownerId == request.auth.uid);
+    }
+
+    function validAdCreate(d) {
+      return d.keys().hasAll([
+          'title', 'businessName', 'category', 'price', 'isNegotiable', 'condition', 'description',
+          'imageUrl', 'state', 'lga', 'phone', 'ownerId', 'ownerName', 'status',
+          'isVerifiedSeller', 'featured', 'viewsCount', 'createdAt'
+        ])
+        && d.keys().hasOnly([
+          'title', 'businessName', 'category', 'price', 'isNegotiable', 'condition', 'description',
+          'imageUrl', 'state', 'lga', 'phone', 'ownerId', 'ownerName', 'status',
+          'isVerifiedSeller', 'featured', 'viewsCount', 'createdAt',
+          'businessId', 'additionalImages', 'locationHub', 'whatsapp', 'cacNumber'
+        ])
+        && d.ownerId == request.auth.uid
+        && d.status == adInitialStatus()
+        && d.isVerifiedSeller == false
+        && d.featured == false
+        && d.viewsCount == 0
+        && d.createdAt == request.time
+        && str(d.title, 3, 150)
+        && str(d.businessName, 2, 120)
+        && str(d.ownerName, 0, 100)
+        && d.category in [
+          'Vehicles', 'Phones & Tablets', 'Electronics & Appliances', 'Fashion & Beauty',
+          'Home, Furniture & Living', 'Real Estate', 'Agriculture & Food',
+          'Commercial & Industrial', 'Services'
+        ]
+        && d.condition in ['Brand New', 'Foreign Used (Tokunbo)', 'Nigerian Used', 'Refurbished']
+        && d.price is number && d.price > 0 && d.price <= 100000000000
+        && d.isNegotiable is bool
+        && str(d.description, 0, 2000)
+        && httpsUrl(d.imageUrl, 600)
+        && str(d.state, 2, 40)
+        && str(d.lga, 1, 80)
+        && str(d.phone, 7, 25)
+        && optStr(d, 'locationHub', 150)
+        && optStr(d, 'whatsapp', 25)
+        && optStr(d, 'cacNumber', 30)
+        && optList(d, 'additionalImages', 6)
+        && linkedBusinessOk(d);
+    }
+
+    match /marketplace/{adId} {
+      allow get, list: if isAdmin()
+        || existing().status == 'active'
+        || (signedIn() && existing().ownerId == request.auth.uid);
+
+      allow create: if isActiveMember() && validAdCreate(incoming());
+
+      allow update: if isAdmin()
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().status in ['pending', 'active', 'removed'];
+
+      allow delete: if isAdmin() || (signedIn() && existing().ownerId == request.auth.uid);
+    }
+
+    // -------------------------------------------------------------------------
+    // reviews: one per member per business (the document id enforces it).
+    // Public to read. You cannot review your own community listing.
+    // -------------------------------------------------------------------------
+    function notOwnBusiness(bid) {
+      return !exists(/databases/$(database)/documents/businesses/$(bid))
+        || get(/databases/$(database)/documents/businesses/$(bid)).data.ownerId != request.auth.uid;
+    }
+
+    match /reviews/{reviewId} {
+      allow get, list: if true;
+
+      allow create: if isActiveMember()
+        && incoming().keys().hasAll(['businessId', 'authorId', 'authorName', 'rating', 'comment', 'createdAt'])
+        && incoming().keys().hasOnly(['businessId', 'authorId', 'authorName', 'rating', 'comment', 'createdAt'])
+        && validId(incoming().businessId, 100)
+        && reviewId == incoming().businessId + '_' + request.auth.uid
+        && incoming().authorId == request.auth.uid
+        && str(incoming().authorName, 1, 100)
+        && incoming().rating is int && incoming().rating >= 1 && incoming().rating <= 5
+        && str(incoming().comment, 3, 1000)
+        && incoming().createdAt == request.time
+        && notOwnBusiness(incoming().businessId);
+
+      allow update: if false;
+      allow delete: if isAdmin() || (signedIn() && existing().authorId == request.auth.uid);
+    }
+
+    // -------------------------------------------------------------------------
+    // reports: "report this listing/ad/review". One per member per target.
+    // Only admins can read or action them.
+    // -------------------------------------------------------------------------
+    match /reports/{reportId} {
+      allow get, list: if isAdmin();
+
+      allow create: if isActiveMember()
+        && incoming().keys().hasAll(['targetType', 'targetId', 'targetTitle', 'reason', 'reporterId', 'status', 'createdAt'])
+        && incoming().keys().hasOnly(['targetType', 'targetId', 'targetTitle', 'reason', 'details', 'reporterId', 'reporterName', 'status', 'createdAt'])
+        && incoming().targetType in ['business', 'ad', 'review']
+        && validId(incoming().targetId, 260)
+        && reportId == request.auth.uid + '_' + incoming().targetType + '_' + incoming().targetId
+        && str(incoming().targetTitle, 1, 150)
+        && incoming().reason in [
+          'Scam or fraud', 'Fake or misleading listing', 'Wrong or outdated information',
+          'Prohibited item or service', 'Offensive or inappropriate content', 'Spam or duplicate', 'Other'
+        ]
+        && optStr(incoming(), 'details', 1000)
+        && optStr(incoming(), 'reporterName', 100)
+        && incoming().reporterId == request.auth.uid
+        && incoming().status == 'open'
+        && incoming().createdAt == request.time;
+
+      allow update, delete: if isAdmin();
+    }
+
+    // -------------------------------------------------------------------------
+    // claims: "I own this business". Pending until an admin approves.
+    // -------------------------------------------------------------------------
+    match /claims/{claimId} {
+      allow get, list: if isAdmin() || (signedIn() && existing().claimantId == request.auth.uid);
+
+      allow create: if isActiveMember()
+        && incoming().keys().hasAll(['businessId', 'businessName', 'claimantId', 'name', 'email', 'phone', 'role', 'status', 'createdAt'])
+        && incoming().keys().hasOnly(['businessId', 'businessName', 'claimantId', 'name', 'email', 'phone', 'role', 'proofNote', 'status', 'createdAt'])
+        && validId(incoming().businessId, 100)
+        && claimId == incoming().businessId + '_' + request.auth.uid
+        && incoming().claimantId == request.auth.uid
+        && str(incoming().businessName, 1, 150)
+        && str(incoming().name, 2, 100)
+        && validEmail(incoming().email)
+        && str(incoming().phone, 7, 25)
+        && incoming().role in ['Owner / Founder', 'General Manager', 'Marketing & PR', 'Authorized Agent']
+        && optStr(incoming(), 'proofNote', 1000)
+        && incoming().status == 'pending'
+        && incoming().createdAt == request.time;
+
+      allow update, delete: if isAdmin();
+    }
+
+    // -------------------------------------------------------------------------
+    // contact_messages: the Contact Us form. Anyone may send (even suspended
+    // members, so they can appeal); only admins can read.
+    // -------------------------------------------------------------------------
+    match /contact_messages/{messageId} {
+      allow get, list, update, delete: if isAdmin();
+
+      allow create: if incoming().keys().hasAll(['name', 'email', 'subject', 'message', 'status', 'createdAt'])
+        && incoming().keys().hasOnly(['name', 'email', 'subject', 'message', 'status', 'createdAt', 'uid'])
+        && str(incoming().name, 2, 100)
+        && validEmail(incoming().email)
+        && str(incoming().subject, 3, 150)
+        && str(incoming().message, 10, 3000)
+        && incoming().status == 'new'
+        && incoming().createdAt == request.time
+        && (!('uid' in incoming()) || (signedIn() && incoming().uid == request.auth.uid));
+    }
+
+    // -------------------------------------------------------------------------
+    // newsletter_subscribers: the document id is the (lower-case) email, so the
+    // same address can't be added twice and the list can't be bloated with
+    // duplicates. Only admins can read.
+    // -------------------------------------------------------------------------
+    function isValidSubscriber(d) {
+      return d.keys().hasAll(['email', 'subscribedAt', 'status'])
+        && d.keys().hasOnly(['email', 'subscribedAt', 'status', 'source'])
+        && validEmail(d.email)
+        && d.email == d.email.lower()
+        && d.subscribedAt is string && d.subscribedAt.size() <= 60
+        && d.status == 'active'
+        && optStr(d, 'source', 50);
+    }
+
+    match /newsletter_subscribers/{subscriberId} {
+      allow get, list, update, delete: if isAdmin();
+      allow create: if isValidSubscriber(incoming()) && subscriberId == incoming().email;
+    }
+
+    // -------------------------------------------------------------------------
+    // audit_log: append-only record of admin actions. Nobody can edit or delete it.
+    // -------------------------------------------------------------------------
+    match /audit_log/{logId} {
+      allow get, list: if isAdmin();
+      allow create: if isAdmin()
+        && incoming().keys().hasAll(['adminId', 'action', 'createdAt'])
+        && incoming().keys().hasOnly(['adminId', 'adminEmail', 'action', 'targetType', 'targetId', 'summary', 'createdAt'])
+        && incoming().adminId == request.auth.uid
+        && str(incoming().action, 1, 60)
+        && optStr(incoming(), 'adminEmail', 150)
+        && optStr(incoming(), 'targetType', 40)
+        && optStr(incoming(), 'targetId', 300)
+        && optStr(incoming(), 'summary', 500)
+        && incoming().createdAt == request.time;
+      allow update, delete: if false;
+    }
+  }
+}

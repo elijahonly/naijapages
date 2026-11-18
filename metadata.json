@@ -1,0 +1,6 @@
+{
+  "name": "NaijaPages: Nigeria Business Directory",
+  "description": "Discover, contact, and explore verified businesses across all 36 Nigerian states and the FCT with instant WhatsApp chat, phone dialer, interactive maps, and LGA breakdown.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,902 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile document containing account details",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "The unique Firebase Authentication user ID",
+          "maxLength": 128
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "description": "The email address of the user",
+          "maxLength": 150
+        },
+        "displayName": {
+          "type": "string",
+          "description": "The display name of the user",
+          "maxLength": 100
+        },
+        "photoURL": {
+          "type": "string",
+          "description": "Profile photo URL (https only)",
+          "maxLength": 2500
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Timestamp when the user document was created",
+          "maxLength": 60
+        }
+      },
+      "required": [
+        "id",
+        "email"
+      ]
+    },
+    "NewsletterSubscriber": {
+      "title": "NewsletterSubscriber",
+      "description": "Subscriber record. The document id is the lower-case email address.",
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "format": "email",
+          "description": "Subscriber email address",
+          "maxLength": 150
+        },
+        "subscribedAt": {
+          "type": "string",
+          "description": "Timestamp when the subscription occurred",
+          "maxLength": 60
+        },
+        "source": {
+          "type": "string",
+          "description": "Subscription source attribution",
+          "maxLength": 50
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "active"
+          ],
+          "description": "Subscription status"
+        }
+      },
+      "required": [
+        "email",
+        "subscribedAt",
+        "status"
+      ]
+    },
+    "AdminRecord": {
+      "title": "AdminRecord",
+      "description": "Existence of /admins/{uid} grants admin rights. The first one is created by hand in the Firebase console.",
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "description": "Admin email",
+          "maxLength": 150
+        },
+        "addedBy": {
+          "type": "string",
+          "description": "uid of the admin who added this admin"
+        },
+        "addedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the admin was added"
+        }
+      }
+    },
+    "BanRecord": {
+      "title": "BanRecord",
+      "description": "Existence of /bans/{uid} suspends that member's posting rights.",
+      "type": "object",
+      "properties": {
+        "reason": {
+          "type": "string",
+          "description": "Reason shown to the member",
+          "maxLength": 500
+        },
+        "email": {
+          "type": "string",
+          "description": "Member email",
+          "maxLength": 150
+        },
+        "name": {
+          "type": "string",
+          "description": "Member name",
+          "maxLength": 100
+        },
+        "bannedBy": {
+          "type": "string",
+          "description": "Admin uid"
+        },
+        "bannedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When"
+        }
+      },
+      "required": [
+        "bannedBy",
+        "bannedAt"
+      ]
+    },
+    "SiteSettings": {
+      "title": "SiteSettings",
+      "description": "Public site settings, edited by admins (document id: site).",
+      "type": "object",
+      "properties": {
+        "contactEmail": {
+          "type": "string",
+          "description": "Public email",
+          "maxLength": 150
+        },
+        "contactPhone": {
+          "type": "string",
+          "description": "Public phone",
+          "maxLength": 40
+        },
+        "whatsapp": {
+          "type": "string",
+          "description": "WhatsApp number",
+          "maxLength": 40
+        },
+        "address": {
+          "type": "string",
+          "description": "Office address",
+          "maxLength": 300
+        },
+        "officeHours": {
+          "type": "string",
+          "description": "Office hours",
+          "maxLength": 200
+        },
+        "aboutStory": {
+          "type": "string",
+          "description": "About page story",
+          "maxLength": 5000
+        },
+        "announcementEnabled": {
+          "type": "boolean",
+          "description": "Show the announcement bar"
+        },
+        "announcementText": {
+          "type": "string",
+          "description": "Announcement text",
+          "maxLength": 300
+        },
+        "adsNeedApproval": {
+          "type": "boolean",
+          "description": "New marketplace ads wait for admin approval"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Last change"
+        },
+        "updatedBy": {
+          "type": "string",
+          "description": "Admin uid"
+        }
+      }
+    },
+    "ListingOverride": {
+      "title": "ListingOverride",
+      "description": "Admin moderation flags for the bundled (built-in) listings. Document id: <kind>_<listing id>.",
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "business",
+            "marketplace"
+          ]
+        },
+        "hidden": {
+          "type": "boolean",
+          "description": "Hide the built-in listing"
+        },
+        "verified": {
+          "type": "boolean",
+          "description": "Mark verified"
+        },
+        "claimedBy": {
+          "type": "string",
+          "description": "uid of the approved claimant"
+        },
+        "updatedBy": {
+          "type": "string",
+          "description": "Admin uid"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When"
+        }
+      },
+      "required": [
+        "kind",
+        "hidden"
+      ]
+    },
+    "Business": {
+      "title": "Business",
+      "description": "A community-submitted business listing. Members create it as 'pending'; only admins approve, verify, reject or remove.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Business name",
+          "maxLength": 120
+        },
+        "category": {
+          "type": "string",
+          "description": "Category",
+          "maxLength": 40
+        },
+        "state": {
+          "type": "string",
+          "description": "State",
+          "maxLength": 40
+        },
+        "lga": {
+          "type": "string",
+          "description": "Local government area",
+          "maxLength": 80
+        },
+        "address": {
+          "type": "string",
+          "description": "Street address",
+          "maxLength": 250
+        },
+        "landmark": {
+          "type": "string",
+          "description": "Landmark",
+          "maxLength": 120
+        },
+        "phone": {
+          "type": "string",
+          "description": "Phone",
+          "maxLength": 25
+        },
+        "secondaryPhone": {
+          "type": "string",
+          "description": "Second phone",
+          "maxLength": 25
+        },
+        "whatsapp": {
+          "type": "string",
+          "description": "WhatsApp",
+          "maxLength": 25
+        },
+        "email": {
+          "type": "string",
+          "description": "Email",
+          "maxLength": 150
+        },
+        "website": {
+          "type": "string",
+          "description": "https website",
+          "maxLength": 300
+        },
+        "googleMapUrl": {
+          "type": "string",
+          "description": "Google Maps link (allow-listed hosts only)",
+          "maxLength": 600
+        },
+        "cacStatus": {
+          "type": "string",
+          "enum": [
+            "registered",
+            "pending",
+            "unregistered"
+          ]
+        },
+        "cacNumber": {
+          "type": "string",
+          "description": "Self-declared CAC number",
+          "maxLength": 30
+        },
+        "yearEstablished": {
+          "type": "integer"
+        },
+        "priceLevel": {
+          "type": "string",
+          "description": "Price level",
+          "maxLength": 4
+        },
+        "paymentMethods": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 10
+        },
+        "socials": {
+          "type": "object",
+          "description": "https profile links"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 15
+        },
+        "openingHours": {
+          "type": "string",
+          "description": "Opening hours",
+          "maxLength": 120
+        },
+        "description": {
+          "type": "string",
+          "description": "Description",
+          "maxLength": 2000
+        },
+        "ownerId": {
+          "type": "string",
+          "description": "Owner uid (must equal the creator)"
+        },
+        "ownerName": {
+          "type": "string",
+          "description": "Owner display name",
+          "maxLength": 100
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "approved",
+            "rejected",
+            "removed"
+          ]
+        },
+        "isVerified": {
+          "type": "boolean",
+          "description": "Admin-controlled badge. Members always create false."
+        },
+        "rating": {
+          "type": "number",
+          "description": "Always 0 at creation"
+        },
+        "reviewsCount": {
+          "type": "number",
+          "description": "Always 0 at creation"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server time"
+        },
+        "moderationNote": {
+          "type": "string",
+          "description": "Reason from an admin",
+          "maxLength": 500
+        },
+        "claimed": {
+          "type": "boolean",
+          "description": "Set when an ownership claim is approved"
+        }
+      },
+      "required": [
+        "name",
+        "category",
+        "state",
+        "lga",
+        "address",
+        "phone",
+        "googleMapUrl",
+        "ownerId",
+        "ownerName",
+        "status",
+        "isVerified",
+        "rating",
+        "reviewsCount",
+        "createdAt"
+      ]
+    },
+    "MarketplaceAd": {
+      "title": "MarketplaceAd",
+      "description": "A member's marketplace ad. Starts 'active', or 'pending' when ads need approval.",
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "description": "Ad title",
+          "maxLength": 150
+        },
+        "businessName": {
+          "type": "string",
+          "description": "Seller name",
+          "maxLength": 120
+        },
+        "category": {
+          "type": "string",
+          "description": "Marketplace category"
+        },
+        "price": {
+          "type": "number",
+          "description": "Price in NGN"
+        },
+        "isNegotiable": {
+          "type": "boolean",
+          "description": "Negotiable"
+        },
+        "condition": {
+          "type": "string",
+          "description": "Condition"
+        },
+        "description": {
+          "type": "string",
+          "description": "Description",
+          "maxLength": 2000
+        },
+        "imageUrl": {
+          "type": "string",
+          "description": "https image link",
+          "maxLength": 600
+        },
+        "additionalImages": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 6
+        },
+        "state": {
+          "type": "string",
+          "description": "State",
+          "maxLength": 40
+        },
+        "lga": {
+          "type": "string",
+          "description": "LGA",
+          "maxLength": 80
+        },
+        "locationHub": {
+          "type": "string",
+          "description": "Location detail",
+          "maxLength": 150
+        },
+        "phone": {
+          "type": "string",
+          "description": "Phone",
+          "maxLength": 25
+        },
+        "whatsapp": {
+          "type": "string",
+          "description": "WhatsApp",
+          "maxLength": 25
+        },
+        "cacNumber": {
+          "type": "string",
+          "description": "Self-declared CAC number",
+          "maxLength": 30
+        },
+        "businessId": {
+          "type": "string",
+          "description": "Linked business the poster owns"
+        },
+        "ownerId": {
+          "type": "string",
+          "description": "Poster uid"
+        },
+        "ownerName": {
+          "type": "string",
+          "description": "Poster name",
+          "maxLength": 100
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "active",
+            "removed"
+          ]
+        },
+        "isVerifiedSeller": {
+          "type": "boolean",
+          "description": "Always false at creation"
+        },
+        "featured": {
+          "type": "boolean",
+          "description": "Always false at creation"
+        },
+        "viewsCount": {
+          "type": "number",
+          "description": "Always 0 at creation"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server time"
+        },
+        "moderationNote": {
+          "type": "string",
+          "description": "Reason from an admin",
+          "maxLength": 500
+        }
+      },
+      "required": [
+        "title",
+        "businessName",
+        "category",
+        "price",
+        "isNegotiable",
+        "condition",
+        "description",
+        "imageUrl",
+        "state",
+        "lga",
+        "phone",
+        "ownerId",
+        "ownerName",
+        "status",
+        "isVerifiedSeller",
+        "featured",
+        "viewsCount",
+        "createdAt"
+      ]
+    },
+    "Review": {
+      "title": "Review",
+      "description": "One review per member per business. Document id: <businessId>_<uid>.",
+      "type": "object",
+      "properties": {
+        "businessId": {
+          "type": "string",
+          "description": "Reviewed business id"
+        },
+        "authorId": {
+          "type": "string",
+          "description": "Author uid"
+        },
+        "authorName": {
+          "type": "string",
+          "description": "Author name",
+          "maxLength": 100
+        },
+        "rating": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5
+        },
+        "comment": {
+          "type": "string",
+          "description": "Review text",
+          "maxLength": 1000
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server time"
+        }
+      },
+      "required": [
+        "businessId",
+        "authorId",
+        "authorName",
+        "rating",
+        "comment",
+        "createdAt"
+      ]
+    },
+    "Report": {
+      "title": "Report",
+      "description": "A member's report of a listing, ad or review. Document id: <uid>_<type>_<targetId>.",
+      "type": "object",
+      "properties": {
+        "targetType": {
+          "type": "string",
+          "enum": [
+            "business",
+            "ad",
+            "review"
+          ]
+        },
+        "targetId": {
+          "type": "string",
+          "description": "Reported item id"
+        },
+        "targetTitle": {
+          "type": "string",
+          "description": "Reported item title",
+          "maxLength": 150
+        },
+        "reason": {
+          "type": "string",
+          "description": "One of the fixed reasons"
+        },
+        "details": {
+          "type": "string",
+          "description": "Extra details",
+          "maxLength": 1000
+        },
+        "reporterId": {
+          "type": "string",
+          "description": "Reporter uid"
+        },
+        "reporterName": {
+          "type": "string",
+          "description": "Reporter name",
+          "maxLength": 100
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "open",
+            "resolved",
+            "dismissed"
+          ]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server time"
+        },
+        "resolution": {
+          "type": "string",
+          "description": "Admin note"
+        },
+        "resolvedBy": {
+          "type": "string",
+          "description": "Admin uid"
+        },
+        "resolvedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When"
+        }
+      },
+      "required": [
+        "targetType",
+        "targetId",
+        "targetTitle",
+        "reason",
+        "reporterId",
+        "status",
+        "createdAt"
+      ]
+    },
+    "Claim": {
+      "title": "Claim",
+      "description": "An ownership claim on a listing. Document id: <businessId>_<uid>.",
+      "type": "object",
+      "properties": {
+        "businessId": {
+          "type": "string",
+          "description": "Listing id"
+        },
+        "businessName": {
+          "type": "string",
+          "description": "Listing name",
+          "maxLength": 150
+        },
+        "claimantId": {
+          "type": "string",
+          "description": "Claimant uid"
+        },
+        "name": {
+          "type": "string",
+          "description": "Claimant name",
+          "maxLength": 100
+        },
+        "email": {
+          "type": "string",
+          "description": "Claimant email",
+          "maxLength": 150
+        },
+        "phone": {
+          "type": "string",
+          "description": "Claimant phone",
+          "maxLength": 25
+        },
+        "role": {
+          "type": "string",
+          "description": "Role in the business"
+        },
+        "proofNote": {
+          "type": "string",
+          "description": "Proof provided",
+          "maxLength": 1000
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "approved",
+            "rejected"
+          ]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server time"
+        },
+        "reviewNote": {
+          "type": "string",
+          "description": "Admin note"
+        },
+        "reviewedBy": {
+          "type": "string",
+          "description": "Admin uid"
+        },
+        "reviewedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When"
+        }
+      },
+      "required": [
+        "businessId",
+        "businessName",
+        "claimantId",
+        "name",
+        "email",
+        "phone",
+        "role",
+        "status",
+        "createdAt"
+      ]
+    },
+    "ContactMessage": {
+      "title": "ContactMessage",
+      "description": "A message from the Contact Us form. Anyone can send; only admins can read.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Sender name",
+          "maxLength": 100
+        },
+        "email": {
+          "type": "string",
+          "description": "Sender email",
+          "maxLength": 150
+        },
+        "subject": {
+          "type": "string",
+          "description": "Subject",
+          "maxLength": 150
+        },
+        "message": {
+          "type": "string",
+          "description": "Message",
+          "maxLength": 3000
+        },
+        "uid": {
+          "type": "string",
+          "description": "Sender uid when signed in"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "new",
+            "read",
+            "archived"
+          ]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server time"
+        }
+      },
+      "required": [
+        "name",
+        "email",
+        "subject",
+        "message",
+        "status",
+        "createdAt"
+      ]
+    },
+    "AuditEntry": {
+      "title": "AuditEntry",
+      "description": "Append-only record of an admin action.",
+      "type": "object",
+      "properties": {
+        "adminId": {
+          "type": "string",
+          "description": "Admin uid"
+        },
+        "adminEmail": {
+          "type": "string",
+          "description": "Admin email",
+          "maxLength": 150
+        },
+        "action": {
+          "type": "string",
+          "description": "Action code",
+          "maxLength": 60
+        },
+        "targetType": {
+          "type": "string",
+          "description": "Kind of item",
+          "maxLength": 40
+        },
+        "targetId": {
+          "type": "string",
+          "description": "Item id",
+          "maxLength": 300
+        },
+        "summary": {
+          "type": "string",
+          "description": "What happened",
+          "maxLength": 500
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server time"
+        }
+      },
+      "required": [
+        "adminId",
+        "action",
+        "createdAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "Store individual user account details"
+    },
+    "/newsletter_subscribers/{subscriberId}": {
+      "schema": "NewsletterSubscriber",
+      "description": "Newsletter subscriptions. Document id is the lower-case email."
+    },
+    "/admins/{adminId}": {
+      "schema": "AdminRecord",
+      "description": "Admin allow-list. Existence of the document grants admin rights."
+    },
+    "/bans/{banId}": {
+      "schema": "BanRecord",
+      "description": "Suspended members. Existence of the document suspends the member."
+    },
+    "/settings/{docId}": {
+      "schema": "SiteSettings",
+      "description": "Site-wide settings (document id: site). Public read, admin write."
+    },
+    "/listing_overrides/{overrideId}": {
+      "schema": "ListingOverride",
+      "description": "Admin flags for built-in listings (hide / verify)."
+    },
+    "/businesses/{businessId}": {
+      "schema": "Business",
+      "description": "Community business listings (moderated)."
+    },
+    "/marketplace/{adId}": {
+      "schema": "MarketplaceAd",
+      "description": "Member marketplace ads."
+    },
+    "/reviews/{reviewId}": {
+      "schema": "Review",
+      "description": "Member reviews (one per member per business)."
+    },
+    "/reports/{reportId}": {
+      "schema": "Report",
+      "description": "Member reports for moderators."
+    },
+    "/claims/{claimId}": {
+      "schema": "Claim",
+      "description": "Business ownership claims."
+    },
+    "/contact_messages/{messageId}": {
+      "schema": "ContactMessage",
+      "description": "Contact Us submissions."
+    },
+    "/audit_log/{logId}": {
+      "schema": "AuditEntry",
+      "description": "Append-only admin activity log."
+    }
+  }
+}
