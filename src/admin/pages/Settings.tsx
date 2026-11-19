@@ -1,11 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { doc, onSnapshot } from 'firebase/firestore';
 import { Megaphone, Save, ShieldCheck, Phone, FileText } from 'lucide-react';
-import { db } from '../../lib/firebase';
-import { COL, DEFAULT_SETTINGS, SITE_SETTINGS_DOC } from '../../lib/config';
-import { cleanMultiline, cleanText } from '../../lib/security';
+import { DEFAULT_SETTINGS } from '../../lib/config';
 import { SiteSettings } from '../../types';
-import { saveSettings } from '../api';
+import { fetchAdminSettings, saveSettings } from '../api';
 import { useAdmin } from '../AdminContext';
 import { useRunner } from '../useRunner';
 import { Btn, Card, Field, PageHeader, Spinner, Toggle, inputCls } from '../ui';
@@ -29,30 +26,19 @@ export default function SettingsPage() {
   const [form, setForm] = useState<SiteSettings | null>(null);
   const [dirty, setDirty] = useState(false);
 
-  // Load the current settings once (so edits in progress aren't overwritten by live updates).
+  // Load the current settings once (so edits in progress aren't overwritten by refreshes).
   useEffect(() => {
-    const unsub = onSnapshot(
-      doc(db, COL.settings, SITE_SETTINGS_DOC),
-      (snap) => {
-        setForm((current) => {
-          if (current) return current;
-          const d = (snap.exists() ? snap.data() : {}) as Record<string, unknown>;
-          return {
-            contactEmail: cleanText(d.contactEmail, 150),
-            contactPhone: cleanText(d.contactPhone, 40),
-            whatsapp: cleanText(d.whatsapp, 40),
-            address: cleanText(d.address, 300),
-            officeHours: cleanText(d.officeHours, 200),
-            aboutStory: cleanMultiline(d.aboutStory, 5000),
-            announcementEnabled: d.announcementEnabled === true,
-            announcementText: cleanText(d.announcementText, 300),
-            adsNeedApproval: d.adsNeedApproval === true,
-          };
-        });
-      },
-      () => setForm((c) => c ?? { ...DEFAULT_SETTINGS }),
-    );
-    return unsub;
+    let alive = true;
+    fetchAdminSettings()
+      .then((s) => {
+        if (alive) setForm((current) => current ?? s);
+      })
+      .catch(() => {
+        if (alive) setForm((current) => current ?? { ...DEFAULT_SETTINGS });
+      });
+    return () => {
+      alive = false;
+    };
   }, []);
 
   if (!form) return <Spinner />;

@@ -1,10 +1,7 @@
 import React, { useMemo, useState } from 'react';
-import { doc, getDoc } from 'firebase/firestore';
 import { Ban, CheckCheck, ChevronDown, Flag, Loader2, Trash2, UserX, X } from 'lucide-react';
-import { db } from '../../lib/firebase';
-import { COL } from '../../lib/config';
 import { ReportRecord } from '../../types';
-import { TargetInfo, actOnReport, loadTarget, recent, reportFromSnap, useLive } from '../api';
+import { TargetInfo, actOnReport, fetchAdminReports, loadTarget, useAdminQuery } from '../api';
 import { useAdmin } from '../AdminContext';
 import { useRunner } from '../useRunner';
 import { Badge, Btn, Card, EmptyState, ErrorNote, PageHeader, Spinner, Tabs, formatDate, statusTone, useConfirm } from '../ui';
@@ -30,13 +27,7 @@ const ReportCard: React.FC<{ r: ReportRecord; sameTarget: number; busy: string |
       setLoading(true);
       const t = await loadTarget(r);
       setTarget(t);
-      if (t.ownerId) {
-        try {
-          setOwnerIsAdmin((await getDoc(doc(db, COL.admins, t.ownerId))).exists());
-        } catch {
-          setOwnerIsAdmin(false);
-        }
-      }
+      setOwnerIsAdmin(Boolean(t.ownerIsAdmin));
       setLoading(false);
     }
   };
@@ -145,7 +136,7 @@ const ReportCard: React.FC<{ r: ReportRecord; sameTarget: number; busy: string |
 export default function Reports() {
   const [tab, setTab] = useState<Tab>('open');
   const { busy, run } = useRunner();
-  const { data, loading, error } = useLive(() => recent(COL.reports), reportFromSnap, []);
+  const { data, loading, error } = useAdminQuery(() => fetchAdminReports(), [], []);
 
   const perTarget = useMemo(() => {
     const m = new Map<string, number>();

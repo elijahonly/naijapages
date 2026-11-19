@@ -12,7 +12,8 @@ import {
   MessageCircle,
   Eye,
   Clock,
-  Navigation
+  Navigation,
+  QrCode
 } from 'lucide-react';
 import { Business } from '../types';
 import { formatWhatsAppUrl, formatTelUrl } from '../data/nigeriaData';
@@ -26,6 +27,7 @@ interface BusinessCardProps {
   onViewDetails: () => void;
   onToggleBookmark: () => void;
   onShare: () => void;
+  onOpenQr?: () => void;
 }
 
 export const BusinessCard: React.FC<BusinessCardProps> = ({
@@ -37,6 +39,7 @@ export const BusinessCard: React.FC<BusinessCardProps> = ({
   onViewDetails,
   onToggleBookmark,
   onShare,
+  onOpenQr,
 }) => {
   const whatsappUrl = business.whatsapp 
     ? formatWhatsAppUrl(business.whatsapp, business.name) 
@@ -52,11 +55,20 @@ export const BusinessCard: React.FC<BusinessCardProps> = ({
       }`}
     >
       <div className="flex items-start justify-between gap-3">
-        {/* Number Index & Name block */}
+        {/* Number Index / Logo & Name block */}
         <div className="flex items-start gap-3 min-w-0">
-          <div className="w-8 h-8 rounded-lg bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 font-bold text-xs flex items-center justify-center shrink-0 border border-emerald-200 dark:border-emerald-800">
-            {index + 1}
-          </div>
+          {business.logoUrl ? (
+            <img
+              src={business.logoUrl}
+              alt={`${business.name} logo`}
+              className="w-9 h-9 rounded-lg object-cover shrink-0 border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800"
+              loading="lazy"
+            />
+          ) : (
+            <div className="w-8 h-8 rounded-lg bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 font-bold text-xs flex items-center justify-center shrink-0 border border-emerald-200 dark:border-emerald-800">
+              {index + 1}
+            </div>
+          )}
 
           <div className="min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
@@ -220,15 +232,32 @@ export const BusinessCard: React.FC<BusinessCardProps> = ({
           )}
         </div>
 
-        {/* View Details / Share */}
+        {/* View Details / QR / Share */}
         <div className="flex items-center gap-1.5">
+          {onOpenQr && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpenQr();
+              }}
+              className="p-1.5 text-slate-500 hover:text-emerald-700 dark:text-slate-400 dark:hover:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/60 rounded-lg transition-colors cursor-pointer"
+              title="Generate QR Code"
+              aria-label={`Generate QR code for ${business.name}`}
+            >
+              <QrCode className="w-3.5 h-3.5" />
+            </button>
+          )}
+
           <button
+            type="button"
             onClick={(e) => {
               e.stopPropagation();
               onShare();
             }}
             className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
             title="Share listing"
+            aria-label={`Share ${business.name}`}
           >
             <Share2 className="w-3.5 h-3.5" />
           </button>

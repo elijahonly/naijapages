@@ -1,9 +1,8 @@
 import React, { useDeferredValue, useMemo, useState } from 'react';
 import { Ban, Check, ChevronDown, Eye, EyeOff, ExternalLink, RotateCcw, ShoppingBag, Trash2, BadgeCheck } from 'lucide-react';
-import { COL } from '../../lib/config';
 import { INITIAL_MARKETPLACE_ITEMS } from '../../data/marketplaceData';
 import { MarketplaceItem } from '../../types';
-import { adFromSnap, approveAd, deleteAdForever, recent, removeAd, restoreAd, setSeedHidden, useLive } from '../api';
+import { approveAd, deleteAdForever, fetchAdminAds, removeAd, restoreAd, setSeedHidden, useAdminQuery } from '../api';
 import { useAdmin } from '../AdminContext';
 import { useRunner } from '../useRunner';
 import { Badge, Btn, Card, EmptyState, ErrorNote, PageHeader, SearchBox, Spinner, Tabs, shortDate, statusTone, useConfirm } from '../ui';
@@ -156,7 +155,7 @@ export default function Marketplace() {
   const [tab, setTab] = useState<Tab>('active');
   const [term, setTerm] = useState('');
   const { busy, run } = useRunner();
-  const { data, loading, error } = useLive(() => recent(COL.marketplace), adFromSnap, []);
+  const { data, loading, error } = useAdminQuery(() => fetchAdminAds(), [], []);
 
   const counts = useMemo(() => {
     const c = { active: 0, pending: 0, removed: 0 };

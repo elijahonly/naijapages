@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
-import { X, ShieldCheck, CheckCircle, Send, Loader2, AlertCircle } from 'lucide-react';
+import React, { useRef, useState } from 'react';
+import { X, ShieldCheck, CheckCircle, Send, Loader2, AlertCircle, Paperclip, Trash2 } from 'lucide-react';
 import { Business } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { useModal } from '../hooks/useModal';
 import { CLAIM_ROLES, submitClaim, ValidationError } from '../services/content';
+import { deleteMediaFile, uploadMediaFile } from '../services/media';
 import { friendlyError } from '../lib/errors';
 
 interface ClaimListingModalProps {
@@ -27,20 +28,60 @@ const ClaimForm: React.FC<ClaimListingModalProps & { business: Business }> = ({ 
   const [ownerPhone, setOwnerPhone] = useState('');
   const [role, setRole] = useState<string>(CLAIM_ROLES[0]);
   const [proofNote, setProofNote] = useState('');
+  const [proofAttachmentUrl, setProofAttachmentUrl] = useState<string | null>(null);
+  const [proofFileName, setProofFileName] = useState<string | null>(null);
+  const [uploadingProof, setUploadingProof] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const proofInputRef = useRef<HTMLInputElement>(null);
+
+  const handleProofUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setError(null);
+    setUploadingProof(true);
+    try {
+      const media = await uploadMediaFile({
+        file,
+        purpose: 'claim_proof',
+        replaceKey: proofAttachmentUrl?.replace(/^\/api\/media\//, '') || undefined,
+      });
+      setProofAttachmentUrl(media.url);
+      setProofFileName(media.originalFilename || file.name);
+    } catch (err) {
+      setError(friendlyError(err, 'Could not upload proof document.'));
+    } finally {
+      setUploadingProof(false);
+    }
+  };
+
+  const handleProofRemove = async () => {
+    if (!proofAttachmentUrl) return;
+    const prev = proofAttachmentUrl;
+    setProofAttachmentUrl(null);
+    setProofFileName(null);
+    await deleteMediaFile(prev).catch(() => {});
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (submitting || !currentUser) return;
+    if (submitting || uploadingProof || !currentUser) return;
     setError(null);
     setSubmitting(true);
     try {
       await submitClaim(
         currentUser,
         { id: business.id, name: business.name },
-        { name: ownerName, email: ownerEmail, phone: ownerPhone, role, proofNote },
+        {
+          name: ownerName,
+          email: ownerEmail,
+          phone: ownerPhone,
+          role,
+          proofNote,
+          proofAttachmentUrl: proofAttachmentUrl || undefined,
+        },
       );
       setIsSuccess(true);
       onSubmitted?.(business);
@@ -136,11 +177,64 @@ const ClaimForm: React.FC<ClaimListingModalProps & { business: Business }> = ({ 
               <textarea id="claim-proof" rows={2} maxLength={1000} value={proofNote} onChange={(e) => setProofNote(e.target.value)} placeholder="CAC RC Number: RC-XXXXXX or other proof…" className={fieldCls} />
             </div>
 
+            <div>
+              <span className={labelCls}>Supporting document (Private — JPG, PNG, WebP, or PDF, max 8 MB)</span>
+              <input
+                ref={proofInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp,application/pdf"
+                className="sr-only"
+                onChange={handleProofUpload}
+                aria-label="Upload private claim proof document"
+              />
+              {proofAttachmentUrl ? (
+                <div className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-xs">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <Paperclip size={14} className="text-emerald-600 shrink-0" />
+                    <span className="font-semibold text-emerald-900 dark:text-emerald-200 truncate">
+                      {proofFileName || 'Private proof uploaded'}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      type="button"
+                      disabled={uploadingProof}
+                      onClick={() => proofInputRef.current?.click()}
+                      className="px-2 py-1 text-[11px] font-bold bg-white dark:bg-slate-800 border border-emerald-200 dark:border-emerald-700 rounded-lg cursor-pointer"
+                    >
+                      Replace
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleProofRemove}
+                      aria-label="Remove proof attachment"
+                      className="p-1 text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg cursor-pointer"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  disabled={uploadingProof}
+                  onClick={() => proofInputRef.current?.click()}
+                  className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl border border-dashed border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:border-emerald-500 hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors cursor-pointer disabled:opacity-60"
+                >
+                  {uploadingProof ? <Loader2 size={14} className="animate-spin" /> : <Paperclip size={14} />}
+                  <span>{uploadingProof ? 'Uploading private document…' : 'Attach CAC certificate or utility bill (optional)'}</span>
+                </button>
+              )}
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+                Stored privately — only you and reviewing administrators can access this file.
+              </p>
+            </div>
+
             <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex items-center justify-end gap-2">
               <button type="button" onClick={onClose} className="px-4 py-2 text-xs font-bold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition cursor-pointer">
                 Cancel
               </button>
-              <button type="submit" disabled={submitting} className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed text-white font-bold text-xs px-5 py-2 rounded-xl flex items-center gap-1.5 transition cursor-pointer">
+              <button type="submit" disabled={submitting || uploadingProof} className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed text-white font-bold text-xs px-5 py-2 rounded-xl flex items-center gap-1.5 transition cursor-pointer">
                 {submitting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
                 <span>{submitting ? 'Submitting…' : 'Submit Claim for Review'}</span>
               </button>

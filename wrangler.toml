@@ -1,0 +1,100 @@
+name = "naijapages"
+main = "worker/src/index.ts"
+compatibility_date = "2026-11-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Serve the built Vite SPA alongside /api/* routes from the same Worker origin.
+[assets]
+directory = "./dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+run_worker_first = ["/api/*"]
+
+# -----------------------------------------------------------------------------
+# Default / Local Development Environment (`wrangler dev`, `--local` D1/R2/KV)
+# -----------------------------------------------------------------------------
+[vars]
+APP_ENV = "development"
+APP_NAME = "NaijaPages"
+APP_URL = "http://localhost:3000"
+CORS_ORIGINS = "http://localhost:3000,http://127.0.0.1:3000,http://localhost:8787,http://127.0.0.1:8787"
+REQUIRE_VERIFIED_EMAIL = "true"
+R2_PUBLIC_BASE_URL = ""
+
+[[d1_databases]]
+binding = "DB"
+database_name = "naijapages-db-local"
+# Placeholder UUID for local Miniflare D1 emulation; replace with real IDs in env blocks below.
+database_id = "00000000-0000-0000-0000-000000000001"
+migrations_dir = "worker/migrations"
+
+[[r2_buckets]]
+binding = "MEDIA_BUCKET"
+bucket_name = "naijapages-media-local"
+preview_bucket_name = "naijapages-media-local"
+
+# KV is used strictly for edge rate-limiting and short-lived public settings caching.
+[[kv_namespaces]]
+binding = "RATE_LIMIT_KV"
+id = "00000000000000000000000000000001"
+preview_id = "00000000000000000000000000000001"
+
+# -----------------------------------------------------------------------------
+# Remote Development / Staging Environment (`--env development`)
+# Replace placeholder resource IDs after creating resources in Cloudflare.
+# -----------------------------------------------------------------------------
+[env.development]
+name = "naijapages-dev"
+
+[env.development.vars]
+APP_ENV = "development"
+APP_NAME = "NaijaPages"
+APP_URL = "https://dev.naijapages.example.com"
+CORS_ORIGINS = "https://dev.naijapages.example.com"
+REQUIRE_VERIFIED_EMAIL = "true"
+R2_PUBLIC_BASE_URL = ""
+
+[[env.development.d1_databases]]
+binding = "DB"
+database_name = "naijapages-db-dev"
+database_id = "00000000-0000-0000-0000-000000000002"
+migrations_dir = "worker/migrations"
+
+[[env.development.r2_buckets]]
+binding = "MEDIA_BUCKET"
+bucket_name = "naijapages-media-dev"
+preview_bucket_name = "naijapages-media-dev"
+
+[[env.development.kv_namespaces]]
+binding = "RATE_LIMIT_KV"
+id = "00000000000000000000000000000002"
+preview_id = "00000000000000000000000000000002"
+
+# -----------------------------------------------------------------------------
+# Production Environment (`--env production`)
+# Replace placeholder resource IDs before deploying to production.
+# -----------------------------------------------------------------------------
+[env.production]
+name = "naijapages-prod"
+
+[env.production.vars]
+APP_ENV = "production"
+APP_NAME = "NaijaPages"
+APP_URL = "https://naijapages.ng"
+CORS_ORIGINS = "https://naijapages.ng,https://www.naijapages.ng"
+REQUIRE_VERIFIED_EMAIL = "true"
+R2_PUBLIC_BASE_URL = "https://media.naijapages.ng"
+
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "naijapages-db-prod"
+database_id = "00000000-0000-0000-0000-000000000003"
+migrations_dir = "worker/migrations"
+
+[[env.production.r2_buckets]]
+binding = "MEDIA_BUCKET"
+bucket_name = "naijapages-media-prod"
+
+[[env.production.kv_namespaces]]
+binding = "RATE_LIMIT_KV"
+id = "00000000000000000000000000000003"

@@ -30,7 +30,8 @@ import { Business, GeopoliticalZoneCode, MarketplaceItem } from './types';
 import { useData } from './context/DataContext';
 import { useAuth } from './context/AuthContext';
 import { navigate, Route } from './lib/router';
-import { submitAd, submitBusiness, AdInput, BusinessInput } from './services/content';
+import { addFavourite, removeFavourite, submitAd, submitBusiness, syncFavourites, updateMyBusiness, AdInput, BusinessInput } from './services/content';
+import { computeStateCounts, computeZoneCounts, filterAndSortBusinesses } from './services/directory';
 import { useLocalStorage } from './hooks/useLocalStorage';
 import { Header } from './components/Header';
 import { HeroSearch } from './components/HeroSearch';
@@ -42,6 +43,7 @@ import { AddBusinessModal } from './components/AddBusinessModal';
 import { EmergencyModal } from './components/EmergencyModal';
 import { StateExplorerModal } from './components/StateExplorerModal';
 import { ShareBusinessModal } from './components/ShareBusinessModal';
+import { QrCodeModal } from './components/QrCodeModal';
 import { ClaimListingModal } from './components/ClaimListingModal';
 import { Pagination } from './components/Pagination';
 import { AuthModal } from './components/AuthModal';
@@ -63,8 +65,8 @@ export default function App({ route }: { route: Route }) {
   const [bookmarks, setBookmarks] = useLocalStorage<string[]>('naijapages_bookmarks_v1', []);
   const [isDarkMode, setIsDarkMode] = useLocalStorage<boolean>('naijapages_theme_dark', false);
 
-  const { businesses: allBusinesses, marketplaceItems, settings, error: dataError } = useData();
-  const { currentUser, userProfile, requireMember } = useAuth();
+  const { businesses: allBusinesses, marketplaceItems, settings, error: dataError, refresh: refreshData } = useData();
+  const { currentUser, userProfile, requireMember, isAdmin } = useAuth();
 
   // --- Routing: #/ (directory), #/marketplace, #/about, #/contact ---
   const activeMainTab: 'directory' | 'marketplace' = route.name === 'marketplace' ? 'marketplace' : 'directory';
@@ -101,9 +103,11 @@ export default function App({ route }: { route: Route }) {
   const [selectedBusiness, setSelectedBusiness] = useState<Business | null>(allBusinesses[0] || null);
   const [detailsModalBusiness, setDetailsModalBusiness] = useState<Business | null>(null);
   const [shareModalBusiness, setShareModalBusiness] = useState<Business | null>(null);
+  const [qrModalBusiness, setQrModalBusiness] = useState<Business | null>(null);
   const [claimModalBusiness, setClaimModalBusiness] = useState<Business | null>(null);
 
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [editingBusiness, setEditingBusiness] = useState<Business | null>(null);
   const [isEmergencyModalOpen, setIsEmergencyModalOpen] = useState(false);
   const [isStateExplorerOpen, setIsStateExplorerOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -116,6 +120,25 @@ export default function App({ route }: { route: Route }) {
       document.documentElement.classList.remove('dark');
     }
   }, [isDarkMode]);
+
+  // Sync device bookmarks with D1 favourites when signed in
+  useEffect(() => {
+    if (!currentUser?.uid) return;
+    let cancelled = false;
+    void syncFavourites(bookmarks)
+      .then((serverIds) => {
+        if (!cancelled && Array.isArray(serverIds)) {
+          setBookmarks(serverIds);
+        }
+      })
+      .catch(() => {
+        // Keep local bookmarks intact if network is temporarily unavailable
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser?.uid]);
 
   // Each page gets its own tab title, and navigating between pages starts at the top.
   useEffect(() => {
@@ -137,7 +160,16 @@ export default function App({ route }: { route: Route }) {
 
   // Member-only actions. requireMember opens the sign-in / verify-email / suspended prompt when needed.
   const openAddBusiness = () => {
-    if (requireMember('list your business')) setIsAddModalOpen(true);
+    if (requireMember('list your business')) {
+      setEditingBusiness(null);
+      setIsAddModalOpen(true);
+    }
+  };
+  const openEditBusiness = (biz: Business) => {
+    if (requireMember('edit your business')) {
+      setEditingBusiness(biz);
+      setIsAddModalOpen(true);
+    }
   };
   const openPostAd = () => {
     if (requireMember('post an ad')) setIsPostAdModalOpen(true);
@@ -156,136 +188,50 @@ export default function App({ route }: { route: Route }) {
   }, []);
 
   // Compute counts per geopolitical zone
-  const zoneCounts = useMemo(() => {
-    const counts: Record<GeopoliticalZoneCode, number> = {
-      SW: 0,
-      SS: 0,
-      SE: 0,
-      NC: 0,
-      NW: 0,
-      NE: 0,
-    };
-    allBusinesses.forEach((b) => {
-      const z = stateZoneMap[b.state.toLowerCase()];
-      if (z && z in counts) {
-        counts[z] += 1;
-      }
-    });
-    return counts;
-  }, [allBusinesses, stateZoneMap]);
+  const zoneCounts = useMemo(
+    () => computeZoneCounts(allBusinesses, stateZoneMap),
+    [allBusinesses, stateZoneMap],
+  );
 
   // Compute counts per state
-  const stateCounts = useMemo(() => {
-    const counts: Record<string, number> = {};
-    allBusinesses.forEach((b) => {
-      counts[b.state] = (counts[b.state] || 0) + 1;
-    });
-    return counts;
-  }, [allBusinesses]);
+  const stateCounts = useMemo(() => computeStateCounts(allBusinesses), [allBusinesses]);
 
   // Main filtered businesses list
-  const filteredBusinesses = useMemo(() => {
-    return allBusinesses
-      .filter((b) => {
-        // Bookmarks only filter
-        if (showingBookmarksOnly && !bookmarks.includes(b.id)) {
-          return false;
-        }
-
-        // Search text query
-        if (searchTerm.trim()) {
-          const q = searchTerm.toLowerCase();
-          const matchName = b.name.toLowerCase().includes(q);
-          const matchCat = b.category.toLowerCase().includes(q);
-          const matchState = b.state.toLowerCase().includes(q) || 
-            (b.state.toLowerCase() === 'fct' && 'abuja'.includes(q)) ||
-            (b.state.toLowerCase() === 'rivers' && 'port harcourt'.includes(q)) ||
-            (b.state.toLowerCase() === 'oyo' && 'ibadan'.includes(q)) ||
-            (b.state.toLowerCase() === 'kano' && ('kano'.includes(q) || 'centre of commerce'.includes(q)));
-          const matchLga = b.lga ? b.lga.toLowerCase().includes(q) : false;
-          const matchAddr = b.address.toLowerCase().includes(q);
-          const matchTags = b.tags ? b.tags.some((t) => t.toLowerCase().includes(q)) : false;
-          const matchDesc = b.description ? b.description.toLowerCase().includes(q) : false;
-
-          if (!matchName && !matchCat && !matchState && !matchLga && !matchAddr && !matchTags && !matchDesc) {
-            return false;
-          }
-        }
-
-        // State filter (supports 'Abuja'/'FCT', 'Rivers'/'Port Harcourt', 'Oyo'/'Ibadan' synonymously)
-        if (selectedState) {
-          const sel = selectedState.toLowerCase();
-          const biz = b.state.toLowerCase();
-          const isFctAbujaMatch = (sel === 'fct' || sel === 'abuja') && (biz === 'fct' || biz === 'abuja');
-          const isRiversPhMatch = (sel === 'rivers' || sel === 'port harcourt') && (biz === 'rivers' || biz === 'port harcourt');
-          const isOyoIbadanMatch = (sel === 'oyo' || sel === 'ibadan') && (biz === 'oyo' || biz === 'ibadan');
-          if (!isFctAbujaMatch && !isRiversPhMatch && !isOyoIbadanMatch && sel !== biz) {
-            return false;
-          }
-        }
-
-        // LGA filter
-        if (selectedLga && b.lga.toLowerCase() !== selectedLga.toLowerCase()) {
-          return false;
-        }
-
-        // Geopolitical Zone filter
-        if (activeZone !== 'ALL') {
-          const bizZone = stateZoneMap[b.state.toLowerCase()];
-          if (bizZone !== activeZone) {
-            return false;
-          }
-        }
-
-        // Category filter
-        if (selectedCategory !== 'All' && b.category.toLowerCase() !== selectedCategory.toLowerCase()) {
-          return false;
-        }
-
-        // Verified only
-        if (verifiedOnly && !b.isVerified) {
-          return false;
-        }
-
-        // WhatsApp direct only
-        if (whatsappOnly && !b.whatsapp && !b.phone) {
-          return false;
-        }
-
-        // High rated (4.5+)
-        if (highRatedOnly && b.rating < 4.5) {
-          return false;
-        }
-
-        return true;
-      })
-      .sort((a, b) => {
-        // New member listings have no rating yet, so they are ranked first ("New") rather than buried under 37,000 rated entries.
-        if (sortBy === 'rating') {
-          const rank = (x: Business) => (x.isUserAdded && !x.reviewsCount ? 5.1 : x.rating);
-          return rank(b) - rank(a) || (b.createdAt ?? 0) - (a.createdAt ?? 0);
-        }
-        if (sortBy === 'newest') return (b.createdAt ?? 0) - (a.createdAt ?? 0);
-        if (sortBy === 'reviews') return b.reviewsCount - a.reviewsCount;
-        if (sortBy === 'verified') return (b.isVerified ? 1 : 0) - (a.isVerified ? 1 : 0);
-        if (sortBy === 'name') return a.name.localeCompare(b.name);
-        return 0;
-      });
-  }, [
-    allBusinesses,
-    bookmarks,
-    showingBookmarksOnly,
-    searchTerm,
-    selectedState,
-    selectedLga,
-    activeZone,
-    selectedCategory,
-    verifiedOnly,
-    whatsappOnly,
-    highRatedOnly,
-    sortBy,
-    stateZoneMap,
-  ]);
+  const filteredBusinesses = useMemo(
+    () =>
+      filterAndSortBusinesses(
+        allBusinesses,
+        {
+          searchTerm,
+          selectedState,
+          selectedLga,
+          selectedCategory,
+          activeZone,
+          verifiedOnly,
+          whatsappOnly,
+          highRatedOnly,
+          showingBookmarksOnly,
+          bookmarks,
+          sortBy,
+        },
+        stateZoneMap,
+      ),
+    [
+      allBusinesses,
+      bookmarks,
+      showingBookmarksOnly,
+      searchTerm,
+      selectedState,
+      selectedLga,
+      activeZone,
+      selectedCategory,
+      verifiedOnly,
+      whatsappOnly,
+      highRatedOnly,
+      sortBy,
+      stateZoneMap,
+    ],
+  );
 
   // Reset to page 1 on filter changes
   useEffect(() => {
@@ -346,16 +292,24 @@ export default function App({ route }: { route: Route }) {
 
   // Handlers
   const handleToggleBookmark = (id: string) => {
+    const exists = bookmarks.includes(id);
     setBookmarks((prev) => {
-      const exists = prev.includes(id);
-      if (exists) {
+      if (prev.includes(id)) {
         showToast('Business removed from saved list');
         return prev.filter((bId) => bId !== id);
-      } else {
-        showToast('Business added to saved list ⭐');
-        return [...prev, id];
       }
+      showToast('Business added to saved list ⭐');
+      return [...prev, id];
     });
+    if (currentUser) {
+      void (exists ? removeFavourite(id) : addFavourite(id))
+        .then((serverIds) => {
+          if (Array.isArray(serverIds)) setBookmarks(serverIds);
+        })
+        .catch(() => {
+          // Keep optimistic bookmark state
+        });
+    }
   };
 
   // Saved to the shared database as "pending"; an admin approves it before it appears publicly.
@@ -363,6 +317,14 @@ export default function App({ route }: { route: Route }) {
     if (!currentUser) throw new Error('Please sign in first.');
     await submitBusiness(currentUser, userProfile?.displayName, input);
     showToast(`"${input.name}" was submitted for review. Track it under My Submissions. 🎉`);
+  };
+
+  const handleUpdateBusiness = async (id: string, input: BusinessInput) => {
+    if (!currentUser) throw new Error('Please sign in first.');
+    const updated = await updateMyBusiness(id, input);
+    if (detailsModalBusiness?.id === id) setDetailsModalBusiness(updated);
+    if (selectedBusiness?.id === id) setSelectedBusiness(updated);
+    showToast(`"${updated.name}" has been updated. ✅`);
   };
 
   const handleResetFilters = () => {
@@ -445,8 +407,15 @@ export default function App({ route }: { route: Route }) {
       <AnnouncementBar enabled={settings.announcementEnabled} text={settings.announcementText} />
       <AccountBanner />
       {dataError && (
-        <div role="status" className="bg-slate-100 dark:bg-slate-900 text-slate-600 dark:text-slate-400 text-[11px] px-4 py-1.5 text-center border-b border-slate-200 dark:border-slate-800">
-          Community listings are taking a moment to load. Showing the built-in directory for now.
+        <div role="status" className="bg-slate-100 dark:bg-slate-900 text-slate-600 dark:text-slate-400 text-[11px] px-4 py-1.5 text-center border-b border-slate-200 dark:border-slate-800 flex items-center justify-center gap-2">
+          <span>Community listings are taking a moment to load. Showing the built-in directory for now.</span>
+          <button
+            type="button"
+            onClick={() => void refreshData()}
+            className="font-bold text-emerald-700 dark:text-emerald-400 underline underline-offset-2 cursor-pointer"
+          >
+            Retry
+          </button>
         </div>
       )}
 
@@ -657,6 +626,7 @@ export default function App({ route }: { route: Route }) {
                   onViewDetails={() => setDetailsModalBusiness(business)}
                   onToggleBookmark={() => handleToggleBookmark(business.id)}
                   onShare={() => setShareModalBusiness(business)}
+                  onOpenQr={() => setQrModalBusiness(business)}
                 />
               ))}
 
@@ -694,6 +664,7 @@ export default function App({ route }: { route: Route }) {
                   onViewDetails={() => setDetailsModalBusiness(business)}
                   onToggleBookmark={() => handleToggleBookmark(business.id)}
                   onShare={() => setShareModalBusiness(business)}
+                  onOpenQr={() => setQrModalBusiness(business)}
                 />
               ))}
             </div>
@@ -743,6 +714,13 @@ export default function App({ route }: { route: Route }) {
         marketplaceItems={marketplaceItems}
         onSelectProduct={(item) => setSelectedMarketplaceItem(item)}
         onPostProductForBusiness={openPostAd}
+        onEdit={(biz) => {
+          setDetailsModalBusiness(null);
+          openEditBusiness(biz);
+        }}
+        onOpenQr={() => {
+          if (detailsModalBusiness) setQrModalBusiness(detailsModalBusiness);
+        }}
       />
 
       <ProductDetailsModal
@@ -765,8 +743,13 @@ export default function App({ route }: { route: Route }) {
 
       <AddBusinessModal
         isOpen={isAddModalOpen}
-        onClose={() => setIsAddModalOpen(false)}
+        onClose={() => {
+          setIsAddModalOpen(false);
+          setEditingBusiness(null);
+        }}
         onAddBusiness={handleAddBusiness}
+        initialBusiness={editingBusiness}
+        onUpdateBusiness={handleUpdateBusiness}
       />
 
       <EmergencyModal
@@ -790,6 +773,24 @@ export default function App({ route }: { route: Route }) {
         business={shareModalBusiness}
         isOpen={Boolean(shareModalBusiness)}
         onClose={() => setShareModalBusiness(null)}
+        onOpenQr={() => {
+          if (shareModalBusiness) setQrModalBusiness(shareModalBusiness);
+        }}
+      />
+
+      <QrCodeModal
+        business={qrModalBusiness}
+        isOpen={Boolean(qrModalBusiness)}
+        onClose={() => setQrModalBusiness(null)}
+        onEditBusiness={
+          qrModalBusiness && (isAdmin || (currentUser && qrModalBusiness.ownerId === currentUser.uid))
+            ? (biz) => {
+                setQrModalBusiness(null);
+                setDetailsModalBusiness(null);
+                openEditBusiness(biz);
+              }
+            : undefined
+        }
       />
 
       <ClaimListingModal
@@ -806,6 +807,7 @@ export default function App({ route }: { route: Route }) {
         onClose={() => setIsMySubmissionsOpen(false)}
         onListBusiness={openAddBusiness}
         onPostAd={openPostAd}
+        onEditBusiness={openEditBusiness}
       />
 
       <AuthModal />

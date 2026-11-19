@@ -1,17 +1,15 @@
 import React, { useMemo, useState } from 'react';
 import { Archive, ChevronDown, Download, Inbox, Mail, MailOpen, Trash2, Users as UsersIcon } from 'lucide-react';
-import { COL } from '../../lib/config';
 import { csvCell } from '../../lib/security';
 import {
   MessageRow,
   SubscriberRow,
   deleteMessage,
   deleteSubscriber,
-  messageFromSnap,
-  recent,
+  fetchAdminMessages,
+  fetchAdminSubscribers,
   setMessageStatus,
-  subscriberFromSnap,
-  useLive,
+  useAdminQuery,
 } from '../api';
 import { useAdmin } from '../AdminContext';
 import { useRunner } from '../useRunner';
@@ -81,7 +79,7 @@ const MessagesPane: React.FC = () => {
   const [filter, setFilter] = useState<Filter>('new');
   const [term, setTerm] = useState('');
   const { busy, run } = useRunner();
-  const { data, loading, error } = useLive(() => recent(COL.contactMessages), messageFromSnap, []);
+  const { data, loading, error } = useAdminQuery(() => fetchAdminMessages(), [], []);
   // Messages opened during this visit stay in the list until the tab changes (otherwise opening one in "New" would make it vanish).
   const [opened, setOpened] = useState<Set<string>>(new Set());
   const changeFilter = (f: Filter) => {
@@ -126,7 +124,7 @@ const Newsletter: React.FC = () => {
   const { busy, run } = useRunner();
   const confirm = useConfirm();
   const [term, setTerm] = useState('');
-  const { data, loading, error } = useLive(() => recent(COL.subscribers, 'subscribedAt'), subscriberFromSnap, []);
+  const { data, loading, error } = useAdminQuery(() => fetchAdminSubscribers(), [], []);
 
   const q = term.trim().toLowerCase();
   const rows = useMemo(() => data.filter((s) => !q || s.email.toLowerCase().includes(q)), [data, q]);

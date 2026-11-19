@@ -1,9 +1,6 @@
-import React, { useEffect, useState } from 'react';
-import { collection, limit, query, where } from 'firebase/firestore';
+import React from 'react';
 import { ArrowRight, Building2, Check, Flag, Mail, ShieldCheck, ShoppingBag, Star, Users, BadgeCheck, MailPlus } from 'lucide-react';
-import { db } from '../../lib/firebase';
-import { COL } from '../../lib/config';
-import { approveBusiness, auditFromSnap, countOf, recent, useLive } from '../api';
+import { AdminOverview, approveBusiness, fetchAdminOverview, useAdminQuery } from '../api';
 import { useAdmin } from '../AdminContext';
 import { useAuth } from '../../context/AuthContext';
 import { useRunner } from '../useRunner';
@@ -38,29 +35,26 @@ const Stat: React.FC<{ icon: React.ReactNode; label: string; value: number | nul
   </div>
 );
 
+const EMPTY_OVERVIEW: AdminOverview = {
+  stats: { users: 0, businesses: 0, ads: 0, reviews: 0, subscribers: 0 },
+  queues: {
+    pendingBusinesses: [],
+    pendingAds: [],
+    openReports: [],
+    pendingClaims: [],
+    newMessageCount: 0,
+    overrides: [],
+  },
+  recentAudit: [],
+};
+
 export default function Dashboard() {
   const { admin, pendingBusinesses, pendingAds, openReports, pendingClaims, newMessageCount } = useAdmin();
   const { userProfile } = useAuth();
   const { busy, run } = useRunner();
-  const [stats, setStats] = useState<{ users: number; businesses: number; ads: number; reviews: number; subscribers: number } | null>(null);
-  const activity = useLive(() => recent(COL.audit, 'createdAt', 6), auditFromSnap, []);
-
-  useEffect(() => {
-    let alive = true;
-    (async () => {
-      const [users, businesses, ads, reviews, subscribers] = await Promise.all([
-        countOf(collection(db, COL.users)),
-        countOf(query(collection(db, COL.businesses), where('status', '==', 'approved'))),
-        countOf(query(collection(db, COL.marketplace), where('status', '==', 'active'))),
-        countOf(collection(db, COL.reviews)),
-        countOf(collection(db, COL.subscribers)),
-      ]);
-      if (alive) setStats({ users, businesses, ads, reviews, subscribers });
-    })();
-    return () => {
-      alive = false;
-    };
-  }, []);
+  const overview = useAdminQuery(fetchAdminOverview, EMPTY_OVERVIEW, []);
+  const stats = overview.loading && overview.data === EMPTY_OVERVIEW ? null : overview.data.stats;
+  const recentAudit = overview.data.recentAudit;
 
   const today = new Intl.DateTimeFormat('en-NG', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'Africa/Lagos' }).format(new Date());
   const first = (userProfile?.displayName || '').split(' ')[0];
@@ -143,11 +137,11 @@ export default function Dashboard() {
           <h2 className="font-extrabold text-slate-900 dark:text-white">Recent admin activity</h2>
           <a href="#/admin/activity" className="text-xs font-bold text-emerald-700 dark:text-emerald-400 hover:underline">Full log →</a>
         </div>
-        {activity.data.length === 0 ? (
+        {recentAudit.length === 0 ? (
           <p className="text-xs text-slate-500">No admin actions recorded yet.</p>
         ) : (
           <ul className="divide-y divide-slate-100 dark:divide-slate-800">
-            {activity.data.map((a) => (
+            {recentAudit.map((a) => (
               <li key={a.id} className="py-2 flex flex-wrap items-center justify-between gap-2 text-[13px]">
                 <span className="text-slate-700 dark:text-slate-200 min-w-0 truncate"><b>{a.adminEmail || 'An admin'}</b> · {a.summary || a.action}</span>
                 <time className="text-[11px] text-slate-400">{formatDate(a.createdAt)}</time>

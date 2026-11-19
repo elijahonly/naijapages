@@ -1,30 +1,13 @@
 /**
- * Everything that reads or writes member-generated content in Firestore.
+ * Member-generated content client services backed by Cloudflare D1 (`/api/v1/*`).
  *
- * Writes pass through the validators below (clean text, https-only links,
- * allow-listed categories) *before* hitting Firestore, and reads pass through
- * the same URL checks again on the way out. firestore.rules enforces the same
- * limits on the server, so a hand-crafted request can't skip any of this.
+ * Client-side validation runs before calling the Worker API for fast feedback,
+ * and the Worker independently validates, enforces auth/ban/email-verification,
+ * and writes safely to D1.
  */
-import { User } from 'firebase/auth';
-import {
-  QueryDocumentSnapshot,
-  DocumentSnapshot,
-  Timestamp,
-  addDoc,
-  collection,
-  deleteDoc,
-  doc,
-  getDoc,
-  getDocs,
-  limit,
-  query,
-  serverTimestamp,
-  setDoc,
-  where,
-} from 'firebase/firestore';
-import { db } from '../lib/firebase';
-import { COL, LIMITS } from '../lib/config';
+import type { AuthUser as User } from '../context/AuthContext';
+import { LIMITS } from '../lib/config';
+import { ApiClientError, apiFetch, emitDataRefresh } from '../lib/apiClient';
 import {
   cleanEmail,
   cleanMultiline,
@@ -33,6 +16,7 @@ import {
   compact,
   safeGoogleMapsUrl,
   safeHttpUrl,
+  safeMediaUrl,
   safeSocialUrl,
 } from '../lib/security';
 import { CATEGORIES, STATES_DATA } from '../data/nigeriaData';
@@ -66,8 +50,7 @@ const fail = (msg: string): never => {
 // ---------------------------------------------------------------------------
 
 export function toMillis(v: unknown): number | undefined {
-  if (v instanceof Timestamp) return v.toMillis();
-  if (typeof v === 'number') return v;
+  if (typeof v === 'number' && Number.isFinite(v)) return v;
   if (typeof v === 'string') {
     const t = Date.parse(v);
     return Number.isNaN(t) ? undefined : t;
@@ -89,104 +72,7 @@ export function timeAgo(ms?: number): string {
 }
 
 // ---------------------------------------------------------------------------
-// Firestore → app models (re-sanitising links on the way out)
-// ---------------------------------------------------------------------------
-
-type Snap = QueryDocumentSnapshot | DocumentSnapshot;
-type Raw = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
-
-const FALLBACK_AD_IMAGE =
-  'https://images.unsplash.com/photo-1526738549149-8e07eca6c147?w=800&auto=format&fit=crop&q=80';
-
-export function businessFromSnap(snap: Snap): Business {
-  const d = (snap.data({ serverTimestamps: 'estimate' }) ?? {}) as Raw;
-  const socials = d.socials && typeof d.socials === 'object' ? d.socials : {};
-  const cleanSocials = compact({
-    instagram: safeSocialUrl('instagram', socials.instagram),
-    twitter: safeSocialUrl('twitter', socials.twitter),
-    facebook: safeSocialUrl('facebook', socials.facebook),
-    linkedin: safeSocialUrl('linkedin', socials.linkedin),
-    tiktok: safeSocialUrl('tiktok', socials.tiktok),
-  });
-
-  return {
-    id: snap.id,
-    name: cleanText(d.name, LIMITS.name),
-    category: cleanText(d.category, LIMITS.category),
-    state: cleanText(d.state, LIMITS.state),
-    lga: cleanText(d.lga, LIMITS.lga),
-    address: cleanText(d.address, LIMITS.address),
-    landmark: cleanText(d.landmark, LIMITS.landmark) || undefined,
-    phone: cleanText(d.phone, LIMITS.phone),
-    secondaryPhone: cleanText(d.secondaryPhone, LIMITS.phone) || undefined,
-    whatsapp: cleanText(d.whatsapp, LIMITS.phone) || undefined,
-    email: cleanEmail(d.email),
-    website: safeHttpUrl(d.website, { max: LIMITS.url }),
-    googleMapUrl: safeGoogleMapsUrl(d.googleMapUrl),
-    cacStatus: ['registered', 'pending', 'unregistered'].includes(d.cacStatus) ? d.cacStatus : undefined,
-    cacNumber: cleanText(d.cacNumber, LIMITS.cac) || undefined,
-    yearEstablished: Number.isInteger(d.yearEstablished) ? d.yearEstablished : undefined,
-    priceLevel: ['₦', '₦₦', '₦₦₦', '₦₦₦₦'].includes(d.priceLevel) ? d.priceLevel : undefined,
-    paymentMethods: Array.isArray(d.paymentMethods) ? d.paymentMethods.map((p: unknown) => cleanText(p, 40)).filter(Boolean) : undefined,
-    tags: Array.isArray(d.tags) ? d.tags.map((t: unknown) => cleanText(t, 40)).filter(Boolean) : undefined,
-    openingHours: cleanText(d.openingHours, LIMITS.hours) || undefined,
-    description: cleanMultiline(d.description, LIMITS.description) || undefined,
-    socials: cleanSocials,
-    rating: Number(d.rating) || 0,
-    reviewsCount: Number(d.reviewsCount) || 0,
-    isVerified: d.isVerified === true,
-    isUserAdded: true,
-    claimed: d.claimed === true,
-    ownerId: typeof d.ownerId === 'string' ? d.ownerId : undefined,
-    ownerName: cleanText(d.ownerName, LIMITS.displayName) || undefined,
-    status: d.status,
-    moderationNote: cleanText(d.moderationNote, 500) || undefined,
-    createdAt: toMillis(d.createdAt),
-  };
-}
-
-export function adFromSnap(snap: Snap): MarketplaceItem {
-  const d = (snap.data({ serverTimestamps: 'estimate' }) ?? {}) as Raw;
-  const createdAt = toMillis(d.createdAt);
-  const extra: string[] = Array.isArray(d.additionalImages)
-    ? d.additionalImages
-        .map((u: unknown) => safeHttpUrl(u, { httpsOnly: true, max: 600 }))
-        .filter((u: string | undefined): u is string => Boolean(u))
-    : [];
-
-  return {
-    id: snap.id,
-    businessId: typeof d.businessId === 'string' ? d.businessId : undefined,
-    businessName: cleanText(d.businessName, LIMITS.name),
-    title: cleanText(d.title, LIMITS.title),
-    category: d.category as MarketplaceCategory,
-    price: Number(d.price) || 0,
-    isNegotiable: d.isNegotiable === true,
-    condition: d.condition as MarketplaceCondition,
-    description: cleanMultiline(d.description, LIMITS.description),
-    imageUrl: safeHttpUrl(d.imageUrl, { httpsOnly: true, max: 600 }) ?? FALLBACK_AD_IMAGE,
-    additionalImages: extra.length ? extra : undefined,
-    state: cleanText(d.state, LIMITS.state),
-    lga: cleanText(d.lga, LIMITS.lga),
-    locationHub: cleanText(d.locationHub, LIMITS.locationHub) || undefined,
-    phone: cleanText(d.phone, LIMITS.phone),
-    whatsapp: cleanText(d.whatsapp, LIMITS.phone) || undefined,
-    // Never trust a stored flag: community sellers are only "verified" if their linked business is (set in DataContext).
-    isVerifiedSeller: false,
-    cacNumber: cleanText(d.cacNumber, LIMITS.cac) || undefined,
-    featured: false,
-    viewsCount: Number(d.viewsCount) || 0,
-    postedDate: timeAgo(createdAt),
-    ownerId: typeof d.ownerId === 'string' ? d.ownerId : undefined,
-    ownerName: cleanText(d.ownerName, LIMITS.displayName) || undefined,
-    status: d.status,
-    moderationNote: cleanText(d.moderationNote, 500) || undefined,
-    createdAt,
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Validators (form input → clean, rules-compatible payloads)
+// Validators (form input → clean, Worker-compatible payloads)
 // ---------------------------------------------------------------------------
 
 export interface BusinessInput {
@@ -211,6 +97,9 @@ export interface BusinessInput {
   tags?: string[];
   openingHours?: string;
   description?: string;
+  logoUrl?: string;
+  coverImageUrl?: string;
+  gallery?: string[];
 }
 
 const CATEGORY_KEYS = CATEGORIES.filter((c) => c.key !== 'All').map((c) => c.key);
@@ -267,6 +156,25 @@ export function validateBusiness(input: BusinessInput): BusinessInput {
   const list = (arr: string[] | undefined, max: number) =>
     (arr ?? []).map((x) => cleanText(x, 40)).filter(Boolean).slice(0, max);
 
+  let logoUrl: string | undefined;
+  if (input.logoUrl?.trim()) {
+    logoUrl =
+      safeMediaUrl(input.logoUrl, { max: 600 }) ??
+      fail('The business logo must be an uploaded photo or valid https:// address.');
+  }
+
+  let coverImageUrl: string | undefined;
+  if (input.coverImageUrl?.trim()) {
+    coverImageUrl =
+      safeMediaUrl(input.coverImageUrl, { max: 600 }) ??
+      fail('The cover photo must be an uploaded photo or valid https:// address.');
+  }
+
+  const gallery = (input.gallery ?? [])
+    .map((u) => safeMediaUrl(u, { max: 600 }))
+    .filter((u): u is string => Boolean(u))
+    .slice(0, LIMITS.businessGallery);
+
   return compact({
     name,
     category: input.category,
@@ -289,6 +197,9 @@ export function validateBusiness(input: BusinessInput): BusinessInput {
     tags: list(input.tags, LIMITS.tags),
     openingHours: cleanText(input.openingHours, LIMITS.hours),
     description: cleanMultiline(input.description, LIMITS.description),
+    logoUrl,
+    coverImageUrl,
+    gallery,
   }) as BusinessInput;
 }
 
@@ -331,11 +242,11 @@ export function validateAd(input: AdInput): AdInput {
   const phone = cleanPhone(input.phone) ?? fail('Please enter a valid phone number (digits only, e.g. 08031234567).');
 
   const imageUrl =
-    safeHttpUrl(input.imageUrl, { httpsOnly: true, max: 600 }) ??
-    fail('The image link must be a valid web address starting with https://');
+    safeMediaUrl(input.imageUrl, { max: 600 }) ??
+    fail('The image link must be an uploaded photo or valid web address starting with https://');
 
   const extra = (input.additionalImages ?? [])
-    .map((u) => safeHttpUrl(u, { httpsOnly: true, max: 600 }))
+    .map((u) => safeMediaUrl(u, { max: 600 }))
     .filter((u): u is string => Boolean(u))
     .slice(0, LIMITS.adImages);
 
@@ -362,56 +273,80 @@ export function validateAd(input: AdInput): AdInput {
   }) as AdInput;
 }
 
+function rethrowValidation(err: unknown): never {
+  if (err instanceof ApiClientError && err.code === 'VALIDATION_ERROR') {
+    throw new ValidationError(err.message);
+  }
+  throw err;
+}
+
 // ---------------------------------------------------------------------------
-// Writes
+// Writes (D1 via /api/v1/*)
 // ---------------------------------------------------------------------------
 
-const ownerLabel = (user: User, name?: string) =>
-  cleanText(name || user.displayName || user.email?.split('@')[0] || 'Member', LIMITS.displayName);
-
-export async function submitBusiness(user: User, displayName: string | undefined, input: BusinessInput): Promise<string> {
+export async function submitBusiness(_user: User, _displayName: string | undefined, input: BusinessInput): Promise<string> {
   const clean = validateBusiness(input);
-  const ref = await addDoc(collection(db, COL.businesses), {
-    ...clean,
-    ownerId: user.uid,
-    ownerName: ownerLabel(user, displayName),
-    // Members can never set these; the rules reject anything else.
-    status: 'pending',
-    isVerified: false,
-    rating: 0,
-    reviewsCount: 0,
-    createdAt: serverTimestamp(),
-  });
-  return ref.id;
+  try {
+    const res = await apiFetch<{ item: Business }>('/api/v1/directory/businesses', {
+      method: 'POST',
+      body: clean,
+    });
+    emitDataRefresh();
+    return res.item.id;
+  } catch (err) {
+    rethrowValidation(err);
+  }
+}
+
+export async function updateMyBusiness(id: string, input: BusinessInput): Promise<Business> {
+  const clean = validateBusiness(input);
+  try {
+    const res = await apiFetch<{ item: Business }>(
+      `/api/v1/directory/businesses/${encodeURIComponent(id)}`,
+      {
+        method: 'PATCH',
+        body: clean,
+      },
+    );
+    emitDataRefresh();
+    return res.item;
+  } catch (err) {
+    rethrowValidation(err);
+  }
 }
 
 export async function submitAd(
-  user: User,
-  displayName: string | undefined,
+  _user: User,
+  _displayName: string | undefined,
   input: AdInput,
-  needsApproval: boolean,
+  _needsApproval: boolean,
 ): Promise<{ id: string; status: 'active' | 'pending' }> {
   const clean = validateAd(input);
-  const status = needsApproval ? 'pending' : 'active';
-  const ref = await addDoc(collection(db, COL.marketplace), {
-    ...clean,
-    ownerId: user.uid,
-    ownerName: ownerLabel(user, displayName),
-    status,
-    isVerifiedSeller: false,
-    featured: false,
-    viewsCount: 0,
-    createdAt: serverTimestamp(),
-  });
-  return { id: ref.id, status };
+  try {
+    const res = await apiFetch<{ item: MarketplaceItem }>('/api/v1/marketplace/ads', {
+      method: 'POST',
+      body: clean,
+    });
+    emitDataRefresh();
+    const status = res.item.status === 'pending' ? 'pending' : 'active';
+    return { id: res.item.id, status };
+  } catch (err) {
+    rethrowValidation(err);
+  }
 }
 
 export async function deleteMyBusiness(id: string): Promise<void> {
-  await deleteDoc(doc(db, COL.businesses, id));
+  await apiFetch<{ deleted: boolean }>(`/api/v1/directory/businesses/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  });
+  emitDataRefresh();
 }
 
 export async function deleteMyAd(id: string): Promise<void> {
-  await deleteDoc(doc(db, COL.marketplace, id));
+  await apiFetch<{ deleted: boolean }>(`/api/v1/marketplace/ads/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  });
+  emitDataRefresh();
 }
 
 // ---------------------------------------------------------------------------
@@ -424,38 +359,41 @@ export interface MySubmissions {
   claims: ClaimRecord[];
 }
 
-export function claimFromSnap(snap: Snap): ClaimRecord {
-  const d = (snap.data({ serverTimestamps: 'estimate' }) ?? {}) as Raw;
-  return {
-    id: snap.id,
-    businessId: String(d.businessId ?? ''),
-    businessName: cleanText(d.businessName, 150),
-    claimantId: String(d.claimantId ?? ''),
-    name: cleanText(d.name, 100),
-    email: cleanText(d.email, 150),
-    phone: cleanText(d.phone, LIMITS.phone),
-    role: cleanText(d.role, 60),
-    proofNote: cleanMultiline(d.proofNote, 1000) || undefined,
-    status: d.status,
-    createdAt: toMillis(d.createdAt),
-    reviewedBy: d.reviewedBy,
-    reviewedAt: toMillis(d.reviewedAt),
-    reviewNote: cleanText(d.reviewNote, 500) || undefined,
-  };
+export async function fetchMySubmissions(_uid: string): Promise<MySubmissions> {
+  return apiFetch<MySubmissions>('/api/v1/me/submissions');
 }
 
-export async function fetchMySubmissions(uid: string): Promise<MySubmissions> {
-  const [b, a, c] = await Promise.all([
-    getDocs(query(collection(db, COL.businesses), where('ownerId', '==', uid), limit(100))),
-    getDocs(query(collection(db, COL.marketplace), where('ownerId', '==', uid), limit(100))),
-    getDocs(query(collection(db, COL.claims), where('claimantId', '==', uid), limit(50))),
-  ]);
-  const byNewest = <T extends { createdAt?: number }>(x: T[]) => x.sort((p, q) => (q.createdAt ?? 0) - (p.createdAt ?? 0));
-  return {
-    businesses: byNewest(b.docs.map(businessFromSnap)),
-    ads: byNewest(a.docs.map(adFromSnap)),
-    claims: byNewest(c.docs.map(claimFromSnap)),
-  };
+// ---------------------------------------------------------------------------
+// Favourites (bookmarks)
+// ---------------------------------------------------------------------------
+
+export async function fetchFavourites(): Promise<string[]> {
+  const res = await apiFetch<{ businessIds: string[] }>('/api/v1/directory/favourites');
+  return res.businessIds;
+}
+
+export async function syncFavourites(businessIds: string[]): Promise<string[]> {
+  const res = await apiFetch<{ businessIds: string[] }>('/api/v1/directory/favourites/sync', {
+    method: 'POST',
+    body: { businessIds },
+  });
+  return res.businessIds;
+}
+
+export async function addFavourite(businessId: string): Promise<string[]> {
+  const res = await apiFetch<{ businessIds: string[] }>(
+    `/api/v1/directory/favourites/${encodeURIComponent(businessId)}`,
+    { method: 'PUT' },
+  );
+  return res.businessIds;
+}
+
+export async function removeFavourite(businessId: string): Promise<string[]> {
+  const res = await apiFetch<{ businessIds: string[] }>(
+    `/api/v1/directory/favourites/${encodeURIComponent(businessId)}`,
+    { method: 'DELETE' },
+  );
+  return res.businessIds;
 }
 
 // ---------------------------------------------------------------------------
@@ -463,28 +401,18 @@ export async function fetchMySubmissions(uid: string): Promise<MySubmissions> {
 // ---------------------------------------------------------------------------
 
 export async function fetchReviews(businessId: string): Promise<BusinessReview[]> {
-  const snap = await getDocs(query(collection(db, COL.reviews), where('businessId', '==', businessId), limit(100)));
-  return snap.docs
-    .map((s) => {
-      const d = s.data({ serverTimestamps: 'estimate' }) as Raw;
-      const createdAt = toMillis(d.createdAt);
-      return {
-        id: s.id,
-        businessId,
-        author: cleanText(d.authorName, LIMITS.displayName) || 'Member',
-        authorId: typeof d.authorId === 'string' ? d.authorId : undefined,
-        rating: Math.min(5, Math.max(1, Math.round(Number(d.rating) || 1))),
-        comment: cleanMultiline(d.comment, LIMITS.review),
-        date: timeAgo(createdAt),
-        createdAt,
-      } satisfies BusinessReview;
-    })
-    .sort((p, q) => (q.createdAt ?? 0) - (p.createdAt ?? 0));
+  const res = await apiFetch<{ items: BusinessReview[] }>(
+    `/api/v1/directory/businesses/${encodeURIComponent(businessId)}/reviews?pageSize=100`,
+  );
+  return res.items.map((r) => ({
+    ...r,
+    date: r.date || timeAgo(r.createdAt),
+  }));
 }
 
 export async function addReview(
-  user: User,
-  authorName: string | undefined,
+  _user: User,
+  _authorName: string | undefined,
   businessId: string,
   rating: number,
   comment: string,
@@ -494,17 +422,28 @@ export async function addReview(
   const stars = Math.round(rating);
   if (stars < 1 || stars > 5) fail('Please choose a rating from 1 to 5.');
 
-  const ref = doc(db, COL.reviews, `${businessId}_${user.uid}`);
-  if ((await getDoc(ref)).exists()) fail("You've already reviewed this business.");
+  try {
+    await apiFetch<{ item: BusinessReview }>(
+      `/api/v1/directory/businesses/${encodeURIComponent(businessId)}/reviews`,
+      {
+        method: 'POST',
+        body: { rating: stars, comment: text },
+      },
+    );
+    emitDataRefresh();
+  } catch (err) {
+    if (err instanceof ApiClientError && err.code === 'ALREADY_EXISTS') {
+      fail("You've already reviewed this business.");
+    }
+    rethrowValidation(err);
+  }
+}
 
-  await setDoc(ref, {
-    businessId,
-    authorId: user.uid,
-    authorName: ownerLabel(user, authorName),
-    rating: stars,
-    comment: text,
-    createdAt: serverTimestamp(),
+export async function deleteReview(reviewId: string): Promise<void> {
+  await apiFetch<{ deleted: boolean }>(`/api/v1/directory/reviews/${encodeURIComponent(reviewId)}`, {
+    method: 'DELETE',
   });
+  emitDataRefresh();
 }
 
 // ---------------------------------------------------------------------------
@@ -512,44 +451,45 @@ export async function addReview(
 // ---------------------------------------------------------------------------
 
 export async function submitReport(
-  user: User,
-  reporterName: string | undefined,
+  _user: User,
+  _reporterName: string | undefined,
   target: { type: ReportTargetType; id: string; title: string },
   reason: ReportReason,
   details: string,
 ): Promise<void> {
   if (!REPORT_REASONS.includes(reason)) fail('Please choose a reason.');
-  // One report per member per item: the document id is fixed, and members can't overwrite it.
-  const ref = doc(db, COL.reports, `${user.uid}_${target.type}_${target.id}`);
   try {
-    await setDoc(
-      ref,
-      compact({
+    await apiFetch('/api/v1/reports', {
+      method: 'POST',
+      body: compact({
         targetType: target.type,
         targetId: target.id,
         targetTitle: cleanText(target.title, LIMITS.title) || 'Untitled',
         reason,
         details: cleanMultiline(details, LIMITS.reportDetails),
-        reporterId: user.uid,
-        reporterName: ownerLabel(user, reporterName),
-        status: 'open',
-        createdAt: serverTimestamp(),
       }),
-    );
+    });
   } catch (err) {
-    if ((err as { code?: string })?.code === 'permission-denied') {
+    if (err instanceof ApiClientError && err.code === 'ALREADY_EXISTS') {
       fail("We couldn't send your report. If you've already reported this, our team is already looking into it.");
     }
-    throw err;
+    rethrowValidation(err);
   }
 }
 
 export const CLAIM_ROLES = ['Owner / Founder', 'General Manager', 'Marketing & PR', 'Authorized Agent'] as const;
 
 export async function submitClaim(
-  user: User,
+  _user: User,
   business: { id: string; name: string },
-  data: { name: string; email: string; phone: string; role: string; proofNote?: string },
+  data: {
+    name: string;
+    email: string;
+    phone: string;
+    role: string;
+    proofNote?: string;
+    proofAttachmentUrl?: string;
+  },
 ): Promise<void> {
   const name = cleanText(data.name, 100);
   if (name.length < 2) fail('Please enter your full name.');
@@ -557,27 +497,31 @@ export async function submitClaim(
   const phone = cleanPhone(data.phone) ?? fail('Please enter a valid phone number.');
   if (!(CLAIM_ROLES as readonly string[]).includes(data.role)) fail('Please choose your role.');
 
+  const proofAttachmentUrl = data.proofAttachmentUrl
+    ? (safeMediaUrl(data.proofAttachmentUrl, { max: 600, allowPrivate: true }) ??
+      fail('The proof attachment reference is invalid.'))
+    : undefined;
+
   try {
-    await setDoc(
-      doc(db, COL.claims, `${business.id}_${user.uid}`),
-      compact({
+    await apiFetch('/api/v1/claims', {
+      method: 'POST',
+      body: compact({
         businessId: business.id,
         businessName: cleanText(business.name, 150),
-        claimantId: user.uid,
         name,
         email,
         phone,
         role: data.role,
         proofNote: cleanMultiline(data.proofNote, 1000),
-        status: 'pending',
-        createdAt: serverTimestamp(),
+        proofAttachmentUrl,
       }),
-    );
+    });
+    emitDataRefresh();
   } catch (err) {
-    if ((err as { code?: string })?.code === 'permission-denied') {
+    if (err instanceof ApiClientError && err.code === 'ALREADY_EXISTS') {
       fail("We couldn't submit your claim. If you've already claimed this business, our team is reviewing it.");
     }
-    throw err;
+    rethrowValidation(err);
   }
 }
 
@@ -586,7 +530,7 @@ export async function submitClaim(
 // ---------------------------------------------------------------------------
 
 export async function sendContactMessage(
-  user: User | null,
+  _user: User | null,
   data: { name: string; email: string; subject: string; message: string },
 ): Promise<void> {
   const name = cleanText(data.name, 100);
@@ -597,24 +541,26 @@ export async function sendContactMessage(
   const message = cleanMultiline(data.message, LIMITS.contactMessage);
   if (message.length < 10) fail('Your message is a bit short. Please add a few more details.');
 
-  await addDoc(
-    collection(db, COL.contactMessages),
-    compact({ name, email, subject, message, uid: user?.uid, status: 'new', createdAt: serverTimestamp() }),
-  );
-}
-
-/** Returns true on success. Duplicate subscriptions are treated as success so the list can't be probed. */
-export async function subscribeNewsletter(emailInput: string, source: string): Promise<void> {
-  const email = cleanEmail(emailInput) ?? fail('Please provide a valid email address.');
   try {
-    await setDoc(doc(db, COL.subscribers, email), {
-      email,
-      subscribedAt: new Date().toISOString(),
-      source: cleanText(source, 50) || 'homepage_banner',
-      status: 'active',
+    await apiFetch('/api/v1/contact', {
+      method: 'POST',
+      body: { name, email, subject, message },
     });
   } catch (err) {
-    if ((err as { code?: string })?.code === 'permission-denied') return; // already subscribed (documents can't be overwritten)
-    throw err;
+    rethrowValidation(err);
+  }
+}
+
+/** Returns void on success. Duplicate subscriptions are treated as success so the list can't be probed. */
+export async function subscribeNewsletter(emailInput: string, source: string): Promise<void> {
+  const email = cleanEmail(emailInput) ?? fail('Please provide a valid email address.');
+  const cleanSource = cleanText(source, 50) || 'homepage_banner';
+  try {
+    await apiFetch('/api/v1/newsletter', {
+      method: 'POST',
+      body: { email, source: cleanSource },
+    });
+  } catch (err) {
+    rethrowValidation(err);
   }
 }

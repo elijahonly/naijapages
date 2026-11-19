@@ -27,6 +27,7 @@ const labelCls = 'block text-xs font-semibold text-slate-700 dark:text-slate-300
 const AuthDialog: React.FC = () => {
   const {
     currentUser,
+    pendingVerificationEmail,
     ban,
     closeAuthModal,
     authModalMode,
@@ -36,6 +37,7 @@ const AuthDialog: React.FC = () => {
     signInWithEmail,
     signUpWithEmail,
     resetPassword,
+    confirmPasswordReset,
     resendVerification,
     refreshVerification,
     logout,
@@ -55,11 +57,16 @@ const AuthDialog: React.FC = () => {
 
   const mode = authModalMode;
   const isSignUp = mode === 'signup';
+  const verifyTargetEmail = currentUser?.email || pendingVerificationEmail || cleanEmail(email);
 
   // Clear messages when switching between views.
   useEffect(() => {
     setError(null);
     setInfo(null);
+    if (mode === 'reset') {
+      setPassword('');
+      setConfirmPassword('');
+    }
   }, [mode]);
 
   // Re-render once a second while the "resend" cooldown is running.
@@ -117,17 +124,33 @@ const AuthDialog: React.FC = () => {
     setSubmitting(true);
     try {
       await resetPassword(cleanedEmail);
+      setInfo('If an account exists for that email, a password reset link is on its way. Check your inbox (and spam folder).');
     } catch (err) {
-      const code = (err as { code?: string })?.code;
-      // Don't reveal whether an address has an account.
-      if (code !== 'auth/user-not-found') {
-        setError(authErrorMessage(err));
-        setSubmitting(false);
-        return;
-      }
+      setError(authErrorMessage(err));
+    } finally {
+      setSubmitting(false);
     }
-    setInfo('If an account exists for that email, a password reset link is on its way. Check your inbox (and spam folder).');
-    setSubmitting(false);
+  };
+
+  const handleResetConfirm = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    const problem = passwordProblem(password);
+    if (problem) return setError(problem);
+    if (password !== confirmPassword) return setError('Passwords do not match.');
+
+    setSubmitting(true);
+    try {
+      await confirmPasswordReset(password);
+      setInfo('Your password has been updated. Sign in with your new password below.');
+      setPassword('');
+      setConfirmPassword('');
+      openAuthModal('signin', 'Your password was updated. Sign in with your new password.');
+    } catch (err) {
+      setError(authErrorMessage(err));
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const handleResend = async () => {
@@ -136,7 +159,7 @@ const AuthDialog: React.FC = () => {
     if (cooldownRemaining('verify-email', 60_000) > 0) return;
     setSubmitting(true);
     try {
-      await resendVerification();
+      await resendVerification(verifyTargetEmail || undefined);
       startCooldown('verify-email');
       setInfo('Verification email sent. Check your inbox and spam folder.');
     } catch (err) {
@@ -152,8 +175,13 @@ const AuthDialog: React.FC = () => {
     setSubmitting(true);
     try {
       const ok = await refreshVerification();
-      if (ok) closeAuthModal();
-      else setError("We can't see your verification yet. Click the link in the email first, then try again.");
+      if (ok) {
+        closeAuthModal();
+      } else if (!currentUser) {
+        openAuthModal('signin', 'Once you have clicked the verification link in your email, sign in below.');
+      } else {
+        setError("We can't see your verification yet. Click the link in the email first, then try again.");
+      }
     } catch (err) {
       setError(authErrorMessage(err));
     } finally {
@@ -165,6 +193,7 @@ const AuthDialog: React.FC = () => {
     signin: { title: 'Welcome back', sub: 'Sign in to list your business, post ads, and write reviews.' },
     signup: { title: 'Create your free account', sub: 'Join Nigeria’s business community. It takes under a minute.' },
     forgot: { title: 'Reset your password', sub: 'We’ll email you a link to choose a new one.' },
+    reset: { title: 'Choose a new password', sub: 'Enter a strong password to regain access to your account.' },
     verify: { title: 'Verify your email', sub: 'One quick step keeps NaijaPages free of spam and fake accounts.' },
     banned: { title: 'Account suspended', sub: 'Posting is switched off for this account.' },
   };
@@ -366,20 +395,69 @@ const AuthDialog: React.FC = () => {
             </form>
           )}
 
+          {/* ---- Reset password ---- */}
+          {mode === 'reset' && (
+            <form onSubmit={handleResetConfirm} className="space-y-4" noValidate>
+              <div>
+                <label className={labelCls} htmlFor="reset-password">New password</label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400"><Lock size={16} /></div>
+                  <input
+                    id="reset-password"
+                    type={showPw ? 'text' : 'password'}
+                    autoComplete="new-password"
+                    required
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="••••••••"
+                    className={`${inputCls} pr-10`}
+                  />
+                  <button type="button" onClick={() => setShowPw((v) => !v)} className="absolute inset-y-0 right-0 px-3 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200" aria-label={showPw ? 'Hide password' : 'Show password'}>
+                    {showPw ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </div>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">At least 8 characters, with letters and numbers.</p>
+              </div>
+              <div>
+                <label className={labelCls} htmlFor="reset-confirm">Confirm new password</label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400"><Lock size={16} /></div>
+                  <input
+                    id="reset-confirm"
+                    type={showPw ? 'text' : 'password'}
+                    autoComplete="new-password"
+                    required
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    placeholder="••••••••"
+                    className={inputCls}
+                  />
+                </div>
+              </div>
+              <button type="submit" disabled={submitting} className="w-full py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-xl text-sm flex items-center justify-center gap-2 disabled:opacity-60">
+                {submitting && <Loader2 size={16} className="animate-spin" />}
+                <span>Update password</span>
+              </button>
+              <button type="button" onClick={() => openAuthModal('signin')} className="w-full text-xs font-semibold text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white">
+                ← Back to sign in
+              </button>
+            </form>
+          )}
+
           {/* ---- Verify email ---- */}
           {mode === 'verify' && (
             <div className="space-y-4 text-center">
               <div className="w-14 h-14 rounded-2xl bg-emerald-100 dark:bg-emerald-950 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mx-auto">
                 <MailCheck size={28} />
               </div>
-              {currentUser ? (
+              {verifyTargetEmail ? (
                 <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
-                  We sent a verification link to <b className="text-slate-900 dark:text-white break-all">{currentUser.email}</b>. Click it, then come back here.
+                  We sent a verification link to <b className="text-slate-900 dark:text-white break-all">{verifyTargetEmail}</b>. Click it, then come back here.
                 </p>
               ) : (
-                <p className="text-sm text-slate-600 dark:text-slate-300">Please sign in first.</p>
+                <p className="text-sm text-slate-600 dark:text-slate-300">Please sign in or enter your email first.</p>
               )}
-              {currentUser && (
+              {verifyTargetEmail && (
                 <div className="space-y-2">
                   <button type="button" onClick={handleVerified} disabled={submitting} className="w-full py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-xl text-sm flex items-center justify-center gap-2 disabled:opacity-60">
                     {submitting && <Loader2 size={16} className="animate-spin" />}
@@ -389,9 +467,15 @@ const AuthDialog: React.FC = () => {
                     {resendWait > 0 ? `Resend email (${resendWait}s)` : 'Resend verification email'}
                   </button>
                   <p className="text-[11px] text-slate-500 dark:text-slate-400">Can’t find it? Check your spam or promotions folder.</p>
-                  <button type="button" onClick={async () => { await logout(); closeAuthModal(); }} className="text-[11px] font-semibold text-slate-500 hover:text-slate-800 dark:hover:text-white underline underline-offset-2">
-                    Use a different account
-                  </button>
+                  {currentUser ? (
+                    <button type="button" onClick={async () => { await logout(); closeAuthModal(); }} className="text-[11px] font-semibold text-slate-500 hover:text-slate-800 dark:hover:text-white underline underline-offset-2">
+                      Use a different account
+                    </button>
+                  ) : (
+                    <button type="button" onClick={() => openAuthModal('signin')} className="text-[11px] font-semibold text-slate-500 hover:text-slate-800 dark:hover:text-white underline underline-offset-2">
+                      Back to sign in
+                    </button>
+                  )}
                 </div>
               )}
             </div>
@@ -426,7 +510,7 @@ const AuthDialog: React.FC = () => {
 
           <div className="mt-5 text-center text-xs text-slate-400 flex items-center justify-center gap-1.5">
             <ShieldCheck size={14} className="text-emerald-600" />
-            <span>Secured by Google Firebase Authentication</span>
+            <span>Secured with HTTP-only server sessions</span>
           </div>
         </div>
       </div>

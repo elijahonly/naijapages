@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { X, Building2, ShoppingBag, ShieldCheck, Trash2, Loader2, Clock, CheckCircle2, XCircle, Ban, AlertCircle, Plus, Inbox } from 'lucide-react';
+import { X, Building2, ShoppingBag, ShieldCheck, Trash2, Pencil, Loader2, Clock, CheckCircle2, XCircle, Ban, AlertCircle, Plus, Inbox } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useModal } from '../hooks/useModal';
 import { deleteMyAd, deleteMyBusiness, fetchMySubmissions, timeAgo, type MySubmissions } from '../services/content';
+import type { Business } from '../types';
 import { friendlyError, logError } from '../lib/errors';
 
 interface Props {
@@ -10,6 +11,7 @@ interface Props {
   onClose: () => void;
   onListBusiness: () => void;
   onPostAd: () => void;
+  onEditBusiness?: (business: Business) => void;
 }
 
 type Tab = 'businesses' | 'ads' | 'claims';
@@ -30,7 +32,7 @@ const badge = (status?: string) => {
   }
 };
 
-const MySubmissionsPanel: React.FC<Props> = ({ onClose, onListBusiness, onPostAd }) => {
+const MySubmissionsPanel: React.FC<Props> = ({ onClose, onListBusiness, onPostAd, onEditBusiness }) => {
   useModal(onClose);
   const { currentUser } = useAuth();
   const [tab, setTab] = useState<Tab>('businesses');
@@ -54,8 +56,12 @@ const MySubmissionsPanel: React.FC<Props> = ({ onClose, onListBusiness, onPostAd
   }, [currentUser]);
 
   useEffect(() => {
+    if (!currentUser) {
+      onClose();
+      return;
+    }
     void load();
-  }, [load]);
+  }, [currentUser, load, onClose]);
 
   const remove = async (kind: 'business' | 'ad', id: string, title: string) => {
     if (!window.confirm(`Delete "${title}" permanently? This cannot be undone.`)) return;
@@ -90,7 +96,7 @@ const MySubmissionsPanel: React.FC<Props> = ({ onClose, onListBusiness, onPostAd
     </div>
   );
 
-  const Row: React.FC<{ title: string; sub: string; status?: string; note?: string; createdAt?: number; onDelete?: () => void; id: string }> = ({ title, sub, status, note, createdAt, onDelete, id }) => {
+  const Row: React.FC<{ title: string; sub: string; status?: string; note?: string; createdAt?: number; onEdit?: () => void; onDelete?: () => void; id: string }> = ({ title, sub, status, note, createdAt, onEdit, onDelete, id }) => {
     const b = badge(status);
     return (
       <li className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
@@ -108,11 +114,18 @@ const MySubmissionsPanel: React.FC<Props> = ({ onClose, onListBusiness, onPostAd
             <b>Note from our team:</b> {note}
           </p>
         )}
-        {onDelete && (
-          <div className="mt-2.5 flex justify-end">
-            <button onClick={onDelete} disabled={busyId === id} className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-500 hover:text-rose-600 disabled:opacity-50">
-              {busyId === id ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />} Delete
-            </button>
+        {(onEdit || onDelete) && (
+          <div className="mt-2.5 flex justify-end items-center gap-3">
+            {onEdit && (
+              <button onClick={onEdit} disabled={busyId === id} className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 disabled:opacity-50 cursor-pointer">
+                <Pencil size={12} /> Edit
+              </button>
+            )}
+            {onDelete && (
+              <button onClick={onDelete} disabled={busyId === id} className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-500 hover:text-rose-600 disabled:opacity-50 cursor-pointer">
+                {busyId === id ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />} Delete
+              </button>
+            )}
           </div>
         )}
       </li>
@@ -151,7 +164,17 @@ const MySubmissionsPanel: React.FC<Props> = ({ onClose, onListBusiness, onPostAd
             data.businesses.length === 0 ? empty('You haven’t listed a business yet.', { label: 'List your business', onClick: onListBusiness }) : (
               <ul className="space-y-2.5">
                 {data.businesses.map((b) => (
-                  <Row key={b.id} id={b.id} title={b.name} sub={`${b.category} · ${b.lga}, ${b.state}${b.isVerified ? ' · Verified' : ''}`} status={b.status} note={b.moderationNote} createdAt={b.createdAt} onDelete={() => remove('business', b.id, b.name)} />
+                  <Row
+                    key={b.id}
+                    id={b.id}
+                    title={b.name}
+                    sub={`${b.category} · ${b.lga}, ${b.state}${b.isVerified ? ' · Verified' : ''}`}
+                    status={b.status}
+                    note={b.moderationNote}
+                    createdAt={b.createdAt}
+                    onEdit={onEditBusiness && b.status !== 'removed' ? () => { onClose(); onEditBusiness(b); } : undefined}
+                    onDelete={() => remove('business', b.id, b.name)}
+                  />
                 ))}
               </ul>
             )

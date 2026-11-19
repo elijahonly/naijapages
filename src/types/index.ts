@@ -74,6 +74,10 @@ export interface Business {
   status?: ListingStatus;
   /** Reason shown to the owner when an admin rejects or removes the listing. */
   moderationNote?: string;
+  /** Business branding & photography backed by Cloudflare R2 or verified https URLs. */
+  logoUrl?: string;
+  coverImageUrl?: string;
+  gallery?: string[];
   createdAt?: number; // epoch ms
   /** Set once an admin approves an ownership claim. */
   claimed?: boolean;
@@ -182,6 +186,7 @@ export interface ClaimRecord {
   phone: string;
   role: string;
   proofNote?: string;
+  proofAttachmentUrl?: string;
   status: ClaimStatus;
   createdAt?: number;
   reviewedBy?: string;

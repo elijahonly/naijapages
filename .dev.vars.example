@@ -1,0 +1,25 @@
+# Local Cloudflare Worker secrets for `wrangler dev`.
+# Copy this file to `.dev.vars` (gitignored) when working on Phase 3+ auth/media/email features.
+# In staging/production, set each secret via:
+#   npx wrangler secret put <KEY> --env development
+#   npx wrangler secret put <KEY> --env production
+
+# Better Auth signing secret (generate >= 32 random bytes, e.g. `openssl rand -base64 32`)
+BETTER_AUTH_SECRET=change-me-to-a-32-plus-byte-random-secret
+
+# Canonical Worker / Auth origin URL
+BETTER_AUTH_URL=http://localhost:8787
+
+# Google OAuth credentials (redirect URI: <BETTER_AUTH_URL>/api/auth/callback/google)
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+
+# Cloudflare Turnstile server-side verification secret
+TURNSTILE_SECRET_KEY=
+
+# Transactional email provider (Resend) for verification & moderation alerts
+RESEND_API_KEY=
+EMAIL_FROM=noreply@naijapages.ng
+
+# Initial bootstrap admin email (assigned admin role on first sign-up/verification)
+BOOTSTRAP_ADMIN_EMAIL=

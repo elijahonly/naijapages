@@ -1,6 +1,6 @@
 /**
- * Central place for site-wide switches. Anything here that touches security
- * must stay in sync with `firestore.rules` (noted next to each flag).
+ * Central place for site-wide switches. Security and validation limits are
+ * enforced authoritatively by the Cloudflare Worker API (`worker/src/lib/validation.ts`).
  */
 
 export const SITE_NAME = 'NaijaPages';
@@ -11,7 +11,6 @@ export const SITE_TZ = 'Africa/Lagos';
 /**
  * Members must have a verified email before they can list a business, post an
  * ad, review, or report. Google sign-in accounts are always verified.
- * ⚠ Keep in sync with `isActiveMember()` in firestore.rules.
  */
 export const REQUIRE_VERIFIED_EMAIL = true;
 
@@ -38,26 +37,6 @@ export const MAX_PUBLIC_DOCS = 500;
 /** Max rows an admin list loads at once. */
 export const MAX_ADMIN_DOCS = 400;
 
-// --- Firestore collection names ------------------------------------------
-
-export const COL = {
-  users: 'users',
-  admins: 'admins',
-  bans: 'bans',
-  businesses: 'businesses',
-  marketplace: 'marketplace',
-  reviews: 'reviews',
-  reports: 'reports',
-  claims: 'claims',
-  contactMessages: 'contact_messages',
-  subscribers: 'newsletter_subscribers',
-  settings: 'settings',
-  overrides: 'listing_overrides',
-  audit: 'audit_log',
-} as const;
-
-export const SITE_SETTINGS_DOC = 'site';
-
 export const DEFAULT_SETTINGS = {
   contactEmail: '',
   contactPhone: '',
@@ -70,7 +49,7 @@ export const DEFAULT_SETTINGS = {
   adsNeedApproval: false,
 } as const;
 
-/** Field limits — mirrored in firestore.rules so the server enforces the same caps. */
+/** Field limits — mirrored in worker/src/lib/validation.ts so the Worker enforces the same caps. */
 export const LIMITS = {
   name: 120,
   category: 40,
@@ -90,6 +69,7 @@ export const LIMITS = {
   title: 150,
   locationHub: 150,
   adImages: 6,
+  businessGallery: 6,
   review: 1000,
   reportDetails: 1000,
   contactSubject: 150,

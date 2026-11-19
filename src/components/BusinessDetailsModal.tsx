@@ -23,7 +23,10 @@ import {
   Plus,
   Loader2,
   Trash2,
-  AlertCircle
+  AlertCircle,
+  Image as ImageIcon,
+  Pencil,
+  QrCode
 } from 'lucide-react';
 import { Business, BusinessReview, MarketplaceItem } from '../types';
 import { 
@@ -34,12 +37,9 @@ import {
 } from '../data/nigeriaData';
 import { useAuth } from '../context/AuthContext';
 import { useModal } from '../hooks/useModal';
-import { addReview, fetchReviews, ValidationError } from '../services/content';
+import { addReview, deleteReview, fetchReviews, ValidationError } from '../services/content';
 import { friendlyError, logError } from '../lib/errors';
 import { ratingSummary } from '../lib/format';
-import { deleteDoc, doc } from 'firebase/firestore';
-import { db } from '../lib/firebase';
-import { COL } from '../lib/config';
 import type { ReportTarget } from './ReportModal';
 
 interface BusinessDetailsModalProps {
@@ -55,6 +55,8 @@ interface BusinessDetailsModalProps {
   marketplaceItems?: MarketplaceItem[];
   onSelectProduct?: (item: MarketplaceItem) => void;
   onPostProductForBusiness?: (business: Business) => void;
+  onEdit?: (business: Business) => void;
+  onOpenQr?: () => void;
 }
 
 const BusinessDetails: React.FC<BusinessDetailsModalProps & { business: Business }> = ({
@@ -68,6 +70,8 @@ const BusinessDetails: React.FC<BusinessDetailsModalProps & { business: Business
   marketplaceItems = [],
   onSelectProduct,
   onPostProductForBusiness,
+  onEdit,
+  onOpenQr,
 }) => {
   useModal(onClose);
   const { currentUser, userProfile, requireMember, isAdmin } = useAuth();
@@ -135,7 +139,7 @@ const BusinessDetails: React.FC<BusinessDetailsModalProps & { business: Business
   const handleDeleteReview = async (review: BusinessReview) => {
     if (!window.confirm('Delete this review?')) return;
     try {
-      await deleteDoc(doc(db, COL.reviews, review.id));
+      await deleteReview(review.id);
       await loadReviews();
     } catch (err) {
       setReviewError(friendlyError(err, 'We could not delete that review.'));
@@ -203,9 +207,18 @@ const BusinessDetails: React.FC<BusinessDetailsModalProps & { business: Business
                 )}
               </div>
 
-              <h2 className="text-xl sm:text-2xl lg:text-3xl font-black mt-2 tracking-tight">
-                {business.name}
-              </h2>
+              <div className="flex items-center gap-3 mt-2">
+                {business.logoUrl && (
+                  <img
+                    src={business.logoUrl}
+                    alt={`${business.name} logo`}
+                    className="w-12 h-12 rounded-xl object-cover border border-white/25 bg-white/10 shrink-0"
+                  />
+                )}
+                <h2 className="text-xl sm:text-2xl lg:text-3xl font-black tracking-tight">
+                  {business.name}
+                </h2>
+              </div>
 
               <p className="flex items-center gap-1.5 text-xs sm:text-sm text-emerald-100/90 mt-1 font-medium">
                 <MapPin className="w-4 h-4 text-emerald-300 shrink-0" />
@@ -279,7 +292,32 @@ const BusinessDetails: React.FC<BusinessDetailsModalProps & { business: Business
             )}
 
             <div className="ml-auto flex items-center gap-2">
+              {onOpenQr && (
+                <button
+                  type="button"
+                  onClick={onOpenQr}
+                  className="bg-emerald-950/70 hover:bg-emerald-800 text-white text-xs sm:text-sm font-bold px-3 py-2 rounded-xl flex items-center gap-1.5 border border-emerald-500/70 transition-colors cursor-pointer whitespace-nowrap"
+                  title="Generate scannable QR code for WhatsApp or Website"
+                >
+                  <QrCode className="w-4 h-4 text-emerald-300" />
+                  <span>QR Code</span>
+                </button>
+              )}
+
+              {(isOwnListing || isAdmin) && onEdit && (
+                <button
+                  type="button"
+                  onClick={() => onEdit(business)}
+                  className="bg-amber-400 hover:bg-amber-300 text-slate-950 text-xs font-bold px-3 py-2 rounded-xl flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer whitespace-nowrap"
+                  title="Edit business listing"
+                >
+                  <Pencil className="w-3.5 h-3.5" />
+                  <span>Edit</span>
+                </button>
+              )}
+
               <button
+                type="button"
                 onClick={onToggleBookmark}
                 className={`p-2 rounded-xl border transition-colors cursor-pointer ${
                   isBookmarked
@@ -287,14 +325,17 @@ const BusinessDetails: React.FC<BusinessDetailsModalProps & { business: Business
                     : 'bg-emerald-950/60 text-white/90 hover:text-white border-emerald-600 hover:bg-emerald-800/80'
                 }`}
                 title={isBookmarked ? 'Remove bookmark' : 'Bookmark this business'}
+                aria-label={isBookmarked ? 'Remove bookmark' : 'Bookmark this business'}
               >
                 <Bookmark className={`w-4 h-4 ${isBookmarked ? 'fill-current' : ''}`} />
               </button>
 
               <button
+                type="button"
                 onClick={onShare}
                 className="p-2 bg-emerald-950/60 text-white/90 hover:text-white border border-emerald-600 hover:bg-emerald-800/80 rounded-xl transition-colors cursor-pointer"
                 title="Share business profile"
+                aria-label="Share business profile"
               >
                 <Share2 className="w-4 h-4" />
               </button>
@@ -375,6 +416,45 @@ const BusinessDetails: React.FC<BusinessDetailsModalProps & { business: Business
                   </div>
                 )}
               </div>
+
+              {/* Business Cover Photo & Gallery */}
+              {(business.coverImageUrl || (business.gallery && business.gallery.length > 0)) && (
+                <div className="space-y-3">
+                  <h3 className="font-bold text-sm text-slate-400 dark:text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
+                    <ImageIcon className="w-4 h-4 text-emerald-600" />
+                    Business Photos
+                  </h3>
+                  {business.coverImageUrl && (
+                    <div className="w-full h-48 sm:h-60 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 bg-slate-100 dark:bg-slate-950">
+                      <img
+                        src={business.coverImageUrl}
+                        alt={`${business.name} cover`}
+                        className="w-full h-full object-cover"
+                      />
+                    </div>
+                  )}
+                  {business.gallery && business.gallery.length > 0 && (
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                      {business.gallery.map((photoUrl, idx) => (
+                        <a
+                          key={`${photoUrl}-${idx}`}
+                          href={photoUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="block h-28 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 bg-slate-100 dark:bg-slate-950 hover:opacity-95 transition"
+                        >
+                          <img
+                            src={photoUrl}
+                            alt={`${business.name} photo ${idx + 1}`}
+                            className="w-full h-full object-cover"
+                            loading="lazy"
+                          />
+                        </a>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Location & Operating Hours Grid */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

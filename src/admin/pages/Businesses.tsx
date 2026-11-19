@@ -14,22 +14,20 @@ import {
   Ban,
   ShieldOff,
 } from 'lucide-react';
-import { COL } from '../../lib/config';
 import { INITIAL_BUSINESSES, CATEGORIES, STATES_DATA } from '../../data/nigeriaData';
 import { Business } from '../../types';
 import {
   BusinessEdit,
   approveBusiness,
-  businessFromSnap,
   deleteBusinessForever,
   editBusiness,
-  recent,
+  fetchAdminBusinesses,
   rejectBusiness,
   removeBusiness,
   restoreBusiness,
   setBusinessVerified,
   setSeedHidden,
-  useLive,
+  useAdminQuery,
 } from '../api';
 import { useAdmin } from '../AdminContext';
 import { useRunner } from '../useRunner';
@@ -184,6 +182,28 @@ const BusinessRow: React.FC<{ b: Business; busy: string | null; run: ReturnType<
           </Detail>
           <Detail label="Owner account ID"><code className="text-[11px]">{b.ownerId}</code></Detail>
           <div className="sm:col-span-2 lg:col-span-3"><Detail label="Description"><span className="whitespace-pre-line">{b.description}</span></Detail></div>
+          {(b.logoUrl || b.coverImageUrl || (b.gallery && b.gallery.length > 0)) && (
+            <div className="sm:col-span-2 lg:col-span-3">
+              <dt className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Business Media (R2)</dt>
+              <dd className="flex flex-wrap items-center gap-2.5">
+                {b.logoUrl && (
+                  <a href={b.logoUrl} target="_blank" rel="noopener noreferrer" className="block">
+                    <img src={b.logoUrl} alt={`${b.name} logo`} className="w-14 h-14 rounded-lg object-cover border border-slate-200 dark:border-slate-700" title="Business Logo" />
+                  </a>
+                )}
+                {b.coverImageUrl && (
+                  <a href={b.coverImageUrl} target="_blank" rel="noopener noreferrer" className="block">
+                    <img src={b.coverImageUrl} alt={`${b.name} cover`} className="w-24 h-14 rounded-lg object-cover border border-slate-200 dark:border-slate-700" title="Cover Photo" />
+                  </a>
+                )}
+                {b.gallery?.map((gUrl, idx) => (
+                  <a key={`${gUrl}-${idx}`} href={gUrl} target="_blank" rel="noopener noreferrer" className="block">
+                    <img src={gUrl} alt={`${b.name} gallery ${idx + 1}`} className="w-16 h-14 rounded-lg object-cover border border-slate-200 dark:border-slate-700" title={`Gallery ${idx + 1}`} />
+                  </a>
+                ))}
+              </dd>
+            </div>
+          )}
         </dl>
       )}
 
@@ -313,7 +333,7 @@ export default function Businesses() {
   const [tab, setTab] = useState<Tab>('pending');
   const [term, setTerm] = useState('');
   const { busy, run } = useRunner();
-  const { data, loading, error } = useLive(() => recent(COL.businesses), businessFromSnap, []);
+  const { data, loading, error } = useAdminQuery(() => fetchAdminBusinesses(), [], []);
 
   const counts = useMemo(() => {
     const c = { pending: 0, approved: 0, rejected: 0, removed: 0 };

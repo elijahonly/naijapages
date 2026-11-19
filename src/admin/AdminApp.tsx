@@ -1,5 +1,4 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { collection, limit, query, where } from 'firebase/firestore';
 import {
   Building2,
   ClipboardCopy,
@@ -22,16 +21,12 @@ import {
   ExternalLink,
   Lock,
 } from 'lucide-react';
-import firebaseConfig from '../../firebase-applet-config.json';
 import { useAuth } from '../context/AuthContext';
 import { useLocalStorage } from '../hooks/useLocalStorage';
-import { db } from '../lib/firebase';
-import { COL } from '../lib/config';
 import { authErrorMessage } from '../lib/errors';
 import { cleanEmail } from '../lib/security';
 import { navigate } from '../lib/router';
-import { ListingOverride } from '../types';
-import { AdminCtx, adFromSnap, businessFromSnap, claimFromSnap, reportFromSnap, useLive } from './api';
+import { AdminCtx, AdminOverview, fetchAdminOverview, useAdminQuery } from './api';
 import { AdminContext, AdminContextValue } from './AdminContext';
 import { Btn, Card, ConfirmProvider, ErrorNote, ToastProvider, useToast, inputCls } from './ui';
 
@@ -78,39 +73,33 @@ const Shell: React.FC<{ section: string; admin: AdminCtx; displayName: string }>
     setNavOpen(false);
   }, [section]);
 
-  // Live queues of things waiting for a decision (also feed the sidebar badges).
-  const pendingBusinesses = useLive(() => query(collection(db, COL.businesses), where('status', '==', 'pending'), limit(100)), businessFromSnap, []);
-  const pendingAds = useLive(() => query(collection(db, COL.marketplace), where('status', '==', 'pending'), limit(100)), adFromSnap, []);
-  const openReports = useLive(() => query(collection(db, COL.reports), where('status', '==', 'open'), limit(100)), reportFromSnap, []);
-  const pendingClaims = useLive(() => query(collection(db, COL.claims), where('status', '==', 'pending'), limit(100)), claimFromSnap, []);
-  const newMessages = useLive(() => query(collection(db, COL.contactMessages), where('status', '==', 'new'), limit(100)), (s) => s.id, []);
-  const overrides = useLive(
-    () => collection(db, COL.overrides),
-    (s): ListingOverride => {
-      const d = s.data() as Record<string, unknown>;
-      const kind = d.kind === 'marketplace' ? 'marketplace' : 'business';
-      return {
-        id: s.id.startsWith(`${kind}_`) ? s.id.slice(kind.length + 1) : s.id,
-        kind,
-        hidden: d.hidden === true,
-        verified: d.verified === true,
-        claimedBy: typeof d.claimedBy === 'string' ? d.claimedBy : undefined,
-      };
+  const INITIAL_OVERVIEW: AdminOverview = {
+    stats: { users: 0, businesses: 0, ads: 0, reviews: 0, subscribers: 0 },
+    queues: {
+      pendingBusinesses: [],
+      pendingAds: [],
+      openReports: [],
+      pendingClaims: [],
+      newMessageCount: 0,
+      overrides: [],
     },
-    [],
-  );
+    recentAudit: [],
+  };
+
+  // Live D1 queues of things waiting for a decision (also feed the sidebar badges).
+  const overview = useAdminQuery(fetchAdminOverview, INITIAL_OVERVIEW, []);
 
   const ctx = useMemo<AdminContextValue>(
     () => ({
       admin,
-      pendingBusinesses: pendingBusinesses.data,
-      pendingAds: pendingAds.data,
-      openReports: openReports.data,
-      pendingClaims: pendingClaims.data,
-      newMessageCount: newMessages.data.length,
-      overrides: overrides.data,
+      pendingBusinesses: overview.data.queues.pendingBusinesses,
+      pendingAds: overview.data.queues.pendingAds,
+      openReports: overview.data.queues.openReports,
+      pendingClaims: overview.data.queues.pendingClaims,
+      newMessageCount: overview.data.queues.newMessageCount,
+      overrides: overview.data.queues.overrides,
     }),
-    [admin, pendingBusinesses.data, pendingAds.data, openReports.data, pendingClaims.data, newMessages.data.length, overrides.data],
+    [admin, overview.data.queues],
   );
 
   const badgeCount = (key?: string): number => {
@@ -321,8 +310,6 @@ const NotAdminCard: React.FC = () => {
   const toast = useToast();
   const [checking, setChecking] = useState(false);
   const uid = currentUser?.uid ?? '';
-  const project = firebaseConfig.projectId;
-  const dbId = firebaseConfig.firestoreDatabaseId;
 
   const copy = async () => {
     try {
@@ -349,27 +336,20 @@ const NotAdminCard: React.FC = () => {
         ) : (
           <>
             <p className="text-sm text-slate-600 dark:text-slate-300 mb-3">
-              If you own this site, you can make this account the first admin in about a minute. This is a one-time step done in the Firebase console, for security:
+              Admin access is controlled server-side in Cloudflare D1. To grant this account the initial admin role:
             </p>
             <ol className="text-[13px] text-slate-700 dark:text-slate-300 space-y-2 list-decimal pl-5 mb-4">
               <li>
-                Open{' '}
-                <a className="font-bold text-emerald-700 dark:text-emerald-400 underline" target="_blank" rel="noopener noreferrer" href={`https://console.firebase.google.com/project/${project}/firestore`}>
-                  Firestore in the Firebase console
-                </a>{' '}
-                and pick the database <code className="px-1 rounded bg-slate-100 dark:bg-slate-800 text-[12px]">{dbId}</code>.
+                Set <code className="px-1 rounded bg-slate-100 dark:bg-slate-800 text-[12px]">BOOTSTRAP_ADMIN_EMAIL</code> in Worker secrets before verifying your account, or promote this user ID in D1:
               </li>
-              <li>Click <b>Start collection</b> and enter the Collection ID <code className="px-1 rounded bg-slate-100 dark:bg-slate-800">admins</code>.</li>
-              <li>For <b>Document ID</b>, paste this user ID:</li>
             </ol>
             <div className="flex items-center gap-2 mb-4">
               <code className="flex-1 text-[12px] bg-slate-100 dark:bg-slate-800 rounded-lg px-3 py-2 break-all select-all">{uid}</code>
               <Btn onClick={copy} icon={<ClipboardCopy size={13} />}>Copy</Btn>
             </div>
-            <ol start={4} className="text-[13px] text-slate-700 dark:text-slate-300 space-y-2 list-decimal pl-5 mb-5">
-              <li>Add one field: <code className="px-1 rounded bg-slate-100 dark:bg-slate-800">email</code> (string) = your email. Click <b>Save</b>.</li>
-              <li>Come back here and press <b>Check again</b>.</li>
-            </ol>
+            <p className="text-[12px] text-slate-500 dark:text-slate-400 mb-5">
+              Example: <code className="px-1 rounded bg-slate-100 dark:bg-slate-800">UPDATE user SET role = 'admin' WHERE id = '{uid}';</code> then press <b>Check again</b>.
+            </p>
           </>
         )}
 

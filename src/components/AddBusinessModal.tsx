@@ -23,11 +23,18 @@ import {
   FileText,
   DollarSign,
   Compass,
-  Loader2
+  Loader2,
+  Image as ImageIcon,
+  Upload,
+  Trash2,
+  RefreshCw
 } from 'lucide-react';
 import { CATEGORIES, STATES_DATA } from '../data/nigeriaData';
+import type { Business } from '../types';
 import { BusinessInput, ValidationError } from '../services/content';
+import { deleteMediaFile, extractMediaKeyFromUrl, replaceMediaFile, uploadMediaFile } from '../services/media';
 import { friendlyError } from '../lib/errors';
+import { LIMITS } from '../lib/config';
 import { safeGoogleMapsUrl } from '../lib/security';
 
 interface AddBusinessModalProps {
@@ -35,6 +42,9 @@ interface AddBusinessModalProps {
   onClose: () => void;
   /** Resolves when the listing was saved; throw to show an error inside the form. */
   onAddBusiness: (input: BusinessInput) => Promise<void>;
+  /** When supplied, edits this existing listing instead of creating a new one. */
+  initialBusiness?: Business | null;
+  onUpdateBusiness?: (id: string, input: BusinessInput) => Promise<void>;
 }
 
 const NIGERIAN_PAYMENT_OPTIONS = [
@@ -61,54 +71,193 @@ const COMMON_TAG_SUGGESTIONS = [
 const AddBusinessForm: React.FC<AddBusinessModalProps> = ({
   onClose,
   onAddBusiness,
+  initialBusiness,
+  onUpdateBusiness,
 }) => {
   useModal(onClose);
+  const isEditing = Boolean(initialBusiness && onUpdateBusiness);
   const [submitting, setSubmitting] = useState(false);
 
   // Active step / section for navigation
   const [activeTab, setActiveTab] = useState<'basics' | 'location' | 'contact' | 'socials' | 'details'>('basics');
 
   // --- Form State ---
+  const initStateName = initialBusiness?.state || 'Lagos';
+  const initStateLgas = STATES_DATA.find((s) => s.name === initStateName)?.lgas ?? [];
+  const initLgaInList = Boolean(initialBusiness?.lga && initStateLgas.includes(initialBusiness.lga));
+
   // Identity & Legal
-  const [name, setName] = useState('');
-  const [category, setCategory] = useState('Tech');
-  const [cacStatus, setCacStatus] = useState<'registered' | 'pending' | 'unregistered'>('registered');
-  const [cacNumber, setCacNumber] = useState('');
-  const [yearEstablished, setYearEstablished] = useState<string>('');
+  const [name, setName] = useState(initialBusiness?.name ?? '');
+  const [category, setCategory] = useState(initialBusiness?.category ?? 'Tech');
+  const [cacStatus, setCacStatus] = useState<'registered' | 'pending' | 'unregistered'>(
+    initialBusiness?.cacStatus ?? (initialBusiness?.cacNumber ? 'registered' : isEditing ? 'unregistered' : 'registered'),
+  );
+  const [cacNumber, setCacNumber] = useState(initialBusiness?.cacNumber ?? '');
+  const [yearEstablished, setYearEstablished] = useState<string>(
+    initialBusiness?.yearEstablished ? String(initialBusiness.yearEstablished) : '',
+  );
 
   // Location & Google Map (COMPULSORY)
-  const [state, setState] = useState('Lagos');
-  const [selectedLga, setSelectedLga] = useState('Ikeja');
-  const [customLga, setCustomLga] = useState('');
-  const [address, setAddress] = useState('');
-  const [landmark, setLandmark] = useState('');
-  const [googleMapUrl, setGoogleMapUrl] = useState('');
+  const [state, setState] = useState(initStateName);
+  const [selectedLga, setSelectedLga] = useState(
+    initLgaInList ? initialBusiness!.lga : (initStateLgas[0] ?? 'Ikeja'),
+  );
+  const [customLga, setCustomLga] = useState(
+    initialBusiness?.lga && !initLgaInList ? initialBusiness.lga : '',
+  );
+  const [address, setAddress] = useState(initialBusiness?.address ?? '');
+  const [landmark, setLandmark] = useState(initialBusiness?.landmark ?? '');
+  const [googleMapUrl, setGoogleMapUrl] = useState(initialBusiness?.googleMapUrl ?? '');
   const [mapUrlError, setMapUrlError] = useState<string | null>(null);
   const [showMapHelp, setShowMapHelp] = useState(false);
 
   // Contact
-  const [phone, setPhone] = useState('');
-  const [secondaryPhone, setSecondaryPhone] = useState('');
-  const [whatsapp, setWhatsapp] = useState('');
-  const [email, setEmail] = useState('');
-  const [website, setWebsite] = useState('');
+  const [phone, setPhone] = useState(initialBusiness?.phone ?? '');
+  const [secondaryPhone, setSecondaryPhone] = useState(initialBusiness?.secondaryPhone ?? '');
+  const [whatsapp, setWhatsapp] = useState(initialBusiness?.whatsapp ?? '');
+  const [email, setEmail] = useState(initialBusiness?.email ?? '');
+  const [website, setWebsite] = useState(initialBusiness?.website ?? '');
 
   // Socials (Optional)
-  const [instagram, setInstagram] = useState('');
-  const [twitter, setTwitter] = useState('');
-  const [facebook, setFacebook] = useState('');
-  const [linkedin, setLinkedin] = useState('');
-  const [tiktok, setTiktok] = useState('');
+  const [instagram, setInstagram] = useState(initialBusiness?.socials?.instagram ?? '');
+  const [twitter, setTwitter] = useState(initialBusiness?.socials?.twitter ?? '');
+  const [facebook, setFacebook] = useState(initialBusiness?.socials?.facebook ?? '');
+  const [linkedin, setLinkedin] = useState(initialBusiness?.socials?.linkedin ?? '');
+  const [tiktok, setTiktok] = useState(initialBusiness?.socials?.tiktok ?? '');
 
   // Details & Operations
-  const [openingHours, setOpeningHours] = useState('Mon - Sat: 8:00 AM - 6:00 PM');
-  const [priceLevel, setPriceLevel] = useState<'₦' | '₦₦' | '₦₦₦' | '₦₦₦₦'>('₦₦');
-  const [selectedPayments, setSelectedPayments] = useState<string[]>(['Bank Transfer', 'POS / Card', 'Cash']);
-  const [description, setDescription] = useState('');
-  const [selectedTags, setSelectedTags] = useState<string[]>(['POS Available']);
+  const [openingHours, setOpeningHours] = useState(
+    initialBusiness?.openingHours ?? 'Mon - Sat: 8:00 AM - 6:00 PM',
+  );
+  const [priceLevel, setPriceLevel] = useState<'₦' | '₦₦' | '₦₦₦' | '₦₦₦₦'>(
+    (initialBusiness?.priceLevel as '₦' | '₦₦' | '₦₦₦' | '₦₦₦₦') || '₦₦',
+  );
+  const [selectedPayments, setSelectedPayments] = useState<string[]>(
+    initialBusiness?.paymentMethods?.length
+      ? initialBusiness.paymentMethods
+      : ['Bank Transfer', 'POS / Card', 'Cash'],
+  );
+  const [description, setDescription] = useState(initialBusiness?.description ?? '');
+  const [selectedTags, setSelectedTags] = useState<string[]>(
+    initialBusiness?.tags?.length ? initialBusiness.tags : ['POS Available'],
+  );
   const [customTagInput, setCustomTagInput] = useState('');
 
+  // Branding & Photography (R2)
+  const [logoUrl, setLogoUrl] = useState<string | undefined>(initialBusiness?.logoUrl);
+  const [coverImageUrl, setCoverImageUrl] = useState<string | undefined>(initialBusiness?.coverImageUrl);
+  const [gallery, setGallery] = useState<string[]>(initialBusiness?.gallery ?? []);
+  const [uploadingSlot, setUploadingSlot] = useState<string | null>(null);
+  const [mediaError, setMediaError] = useState<string | null>(null);
+
   const [formError, setFormError] = useState<string | null>(null);
+
+  const handleUploadLogo = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setMediaError(null);
+    setUploadingSlot('logo');
+    try {
+      const existingKey = extractMediaKeyFromUrl(logoUrl);
+      const media = existingKey
+        ? await replaceMediaFile(existingKey, file, 'business_logo')
+        : await uploadMediaFile({ file, purpose: 'business_logo' });
+      setLogoUrl(media.url);
+    } catch (err) {
+      setMediaError(friendlyError(err, 'Could not upload business logo.'));
+    } finally {
+      setUploadingSlot(null);
+    }
+  };
+
+  const handleRemoveLogo = async () => {
+    const prev = logoUrl;
+    setLogoUrl(undefined);
+    if (prev && extractMediaKeyFromUrl(prev)) {
+      await deleteMediaFile(prev).catch(() => {});
+    }
+  };
+
+  const handleUploadCover = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setMediaError(null);
+    setUploadingSlot('cover');
+    try {
+      const existingKey = extractMediaKeyFromUrl(coverImageUrl);
+      const media = existingKey
+        ? await replaceMediaFile(existingKey, file, 'business_photo')
+        : await uploadMediaFile({ file, purpose: 'business_photo' });
+      setCoverImageUrl(media.url);
+    } catch (err) {
+      setMediaError(friendlyError(err, 'Could not upload cover photo.'));
+    } finally {
+      setUploadingSlot(null);
+    }
+  };
+
+  const handleRemoveCover = async () => {
+    const prev = coverImageUrl;
+    setCoverImageUrl(undefined);
+    if (prev && extractMediaKeyFromUrl(prev)) {
+      await deleteMediaFile(prev).catch(() => {});
+    }
+  };
+
+  const handleUploadGalleryFiles = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
+    e.target.value = '';
+    if (files.length === 0) return;
+    const remainingSlots = LIMITS.businessGallery - gallery.length;
+    if (remainingSlots <= 0) {
+      setMediaError(`Maximum of ${LIMITS.businessGallery} gallery photos allowed.`);
+      return;
+    }
+    setMediaError(null);
+    setUploadingSlot('gallery');
+    try {
+      const uploadedUrls: string[] = [];
+      for (const file of files.slice(0, remainingSlots)) {
+        const media = await uploadMediaFile({ file, purpose: 'business_gallery' });
+        uploadedUrls.push(media.url);
+      }
+      setGallery((prev) => [...prev, ...uploadedUrls].slice(0, LIMITS.businessGallery));
+    } catch (err) {
+      setMediaError(friendlyError(err, 'Could not upload gallery photo.'));
+    } finally {
+      setUploadingSlot(null);
+    }
+  };
+
+  const handleReplaceGalleryItem = async (idx: number, e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    const currentUrl = gallery[idx];
+    setMediaError(null);
+    setUploadingSlot(`gallery-${idx}`);
+    try {
+      const existingKey = extractMediaKeyFromUrl(currentUrl);
+      const media = existingKey
+        ? await replaceMediaFile(existingKey, file, 'business_gallery')
+        : await uploadMediaFile({ file, purpose: 'business_gallery' });
+      setGallery((prev) => prev.map((u, i) => (i === idx ? media.url : u)));
+    } catch (err) {
+      setMediaError(friendlyError(err, 'Could not replace gallery photo.'));
+    } finally {
+      setUploadingSlot(null);
+    }
+  };
+
+  const handleRemoveGalleryItem = async (idx: number) => {
+    const target = gallery[idx];
+    setGallery((prev) => prev.filter((_, i) => i !== idx));
+    if (target && extractMediaKeyFromUrl(target)) {
+      await deleteMediaFile(target).catch(() => {});
+    }
+  };
 
   const selectedStateObj = STATES_DATA.find((s) => s.name === state);
   const availableLgas = selectedStateObj ? selectedStateObj.lgas : [];
@@ -172,7 +321,7 @@ const AddBusinessForm: React.FC<AddBusinessModalProps> = ({
     if (submitting) return;
     setFormError(null);
 
-    // Quick, friendly checks (the service layer and Firestore rules re-check everything).
+    // Quick, friendly checks (the service layer and Worker API re-check everything).
     if (!name.trim()) {
       setActiveTab('basics');
       setFormError('Please provide the business name.');
@@ -250,15 +399,24 @@ const AddBusinessForm: React.FC<AddBusinessModalProps> = ({
       openingHours: openingHours.trim() || 'Mon - Sat: 8:00 AM - 6:00 PM',
       description:
         description.trim() || `${name.trim()} is a ${category} business located in ${lgaFinal}, ${state} State.`,
+      logoUrl,
+      coverImageUrl,
+      gallery,
     };
 
     setSubmitting(true);
     try {
-      await onAddBusiness(input);
+      if (isEditing && initialBusiness && onUpdateBusiness) {
+        await onUpdateBusiness(initialBusiness.id, input);
+      } else {
+        await onAddBusiness(input);
+      }
       onClose();
     } catch (err) {
       setFormError(
-        err instanceof ValidationError ? err.message : friendlyError(err, 'We could not submit your listing. Please try again.'),
+        err instanceof ValidationError
+          ? err.message
+          : friendlyError(err, isEditing ? 'We could not update your listing. Please try again.' : 'We could not submit your listing. Please try again.'),
       );
     } finally {
       setSubmitting(false);
@@ -284,13 +442,17 @@ const AddBusinessForm: React.FC<AddBusinessModalProps> = ({
               </div>
               <div>
                 <div className="flex items-center gap-2">
-                  <h2 className="font-extrabold text-lg sm:text-xl tracking-tight">Register Nigerian Business</h2>
+                  <h2 className="font-extrabold text-lg sm:text-xl tracking-tight">
+                    {isEditing ? 'Edit Business Listing' : 'Register Nigerian Business'}
+                  </h2>
                   <span className="text-[10px] font-bold uppercase tracking-wider bg-emerald-500/30 text-emerald-200 px-2 py-0.5 rounded border border-emerald-400/30">
-                    Comprehensive Listing
+                    {isEditing ? 'Owner Update' : 'Comprehensive Listing'}
                   </span>
                 </div>
                 <p className="text-xs text-emerald-100/90 mt-0.5">
-                  Connect your business with millions of customers across all 36 States & FCT.
+                  {isEditing
+                    ? 'Update your business information, hours, contact links, and photos.'
+                    : 'Connect your business with millions of customers across all 36 States & FCT.'}
                 </p>
               </div>
             </div>
@@ -305,11 +467,11 @@ const AddBusinessForm: React.FC<AddBusinessModalProps> = ({
           </div>
 
           {/* Navigation Tabs */}
-          <div className="flex items-center gap-1 mt-4 overflow-x-auto pb-1 text-xs font-semibold no-scrollbar">
+          <div className="flex items-center gap-1 mt-4 overflow-x-auto pb-1 text-[11px] font-semibold no-scrollbar">
             <button
               type="button"
               onClick={() => setActiveTab('basics')}
-              className={`px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap cursor-pointer ${
+              className={`px-2.5 py-1.5 rounded-lg transition-colors whitespace-nowrap cursor-pointer ${
                 activeTab === 'basics'
                   ? 'bg-white text-emerald-900 font-bold shadow-sm'
                   : 'text-emerald-200 hover:bg-white/10'
@@ -320,7 +482,7 @@ const AddBusinessForm: React.FC<AddBusinessModalProps> = ({
             <button
               type="button"
               onClick={() => setActiveTab('location')}
-              className={`px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap cursor-pointer flex items-center gap-1 ${
+              className={`px-2.5 py-1.5 rounded-lg transition-colors whitespace-nowrap cursor-pointer flex items-center gap-1 ${
                 activeTab === 'location'
                   ? 'bg-white text-emerald-900 font-bold shadow-sm'
                   : 'text-emerald-200 hover:bg-white/10'
@@ -332,7 +494,7 @@ const AddBusinessForm: React.FC<AddBusinessModalProps> = ({
             <button
               type="button"
               onClick={() => setActiveTab('contact')}
-              className={`px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap cursor-pointer ${
+              className={`px-2.5 py-1.5 rounded-lg transition-colors whitespace-nowrap cursor-pointer ${
                 activeTab === 'contact'
                   ? 'bg-white text-emerald-900 font-bold shadow-sm'
                   : 'text-emerald-200 hover:bg-white/10'
@@ -343,7 +505,7 @@ const AddBusinessForm: React.FC<AddBusinessModalProps> = ({
             <button
               type="button"
               onClick={() => setActiveTab('socials')}
-              className={`px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap cursor-pointer ${
+              className={`px-2.5 py-1.5 rounded-lg transition-colors whitespace-nowrap cursor-pointer ${
                 activeTab === 'socials'
                   ? 'bg-white text-emerald-900 font-bold shadow-sm'
                   : 'text-emerald-200 hover:bg-white/10'
@@ -354,7 +516,7 @@ const AddBusinessForm: React.FC<AddBusinessModalProps> = ({
             <button
               type="button"
               onClick={() => setActiveTab('details')}
-              className={`px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap cursor-pointer ${
+              className={`px-2.5 py-1.5 rounded-lg transition-colors whitespace-nowrap cursor-pointer ${
                 activeTab === 'details'
                   ? 'bg-white text-emerald-900 font-bold shadow-sm'
                   : 'text-emerald-200 hover:bg-white/10'
@@ -487,6 +649,115 @@ const AddBusinessForm: React.FC<AddBusinessModalProps> = ({
                         placeholder="e.g. RC-1492042 or BN-293810"
                         className="w-full px-3.5 py-2 text-sm bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl outline-none focus:border-emerald-500 text-slate-900 dark:text-white uppercase font-mono font-medium"
                       />
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Business Logo, Cover Photo & Gallery (R2) */}
+              <div className="p-4 bg-slate-50 dark:bg-slate-800/40 rounded-xl border border-slate-200 dark:border-slate-800 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                    <ImageIcon className="w-4 h-4 text-emerald-600" />
+                    Business Logo, Cover Photo & Gallery
+                  </span>
+                  <span className="text-[10px] text-slate-500 font-semibold">Optional · JPG/PNG/WebP</span>
+                </div>
+
+                {mediaError && (
+                  <p role="alert" className="text-xs text-rose-600 dark:text-rose-400 font-medium">
+                    {mediaError}
+                  </p>
+                )}
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {/* Logo Upload */}
+                  <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700 space-y-2">
+                    <div className="flex items-center justify-between text-xs font-bold text-slate-700 dark:text-slate-200">
+                      <span>Business Logo (max 2 MB)</span>
+                    </div>
+                    {logoUrl ? (
+                      <div className="flex items-center gap-2.5">
+                        <img src={logoUrl} alt="Business logo preview" className="w-12 h-12 rounded-lg object-cover border border-slate-200 dark:border-slate-700" />
+                        <div className="flex items-center gap-1.5">
+                          <label className="px-2.5 py-1 text-[11px] font-bold bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg cursor-pointer inline-flex items-center gap-1">
+                            {uploadingSlot === 'logo' ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+                            <span>Replace</span>
+                            <input type="file" accept="image/jpeg,image/png,image/webp,image/gif" className="sr-only" onChange={handleUploadLogo} />
+                          </label>
+                          <button type="button" onClick={handleRemoveLogo} aria-label="Remove logo" className="p-1.5 text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg cursor-pointer">
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <label className="flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-lg border border-dashed border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:border-emerald-500 cursor-pointer">
+                        {uploadingSlot === 'logo' ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+                        <span>{uploadingSlot === 'logo' ? 'Uploading…' : 'Upload Logo'}</span>
+                        <input type="file" accept="image/jpeg,image/png,image/webp,image/gif" className="sr-only" onChange={handleUploadLogo} />
+                      </label>
+                    )}
+                  </div>
+
+                  {/* Cover Photo Upload */}
+                  <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700 space-y-2">
+                    <div className="flex items-center justify-between text-xs font-bold text-slate-700 dark:text-slate-200">
+                      <span>Storefront Photo (max 5 MB)</span>
+                    </div>
+                    {coverImageUrl ? (
+                      <div className="flex items-center gap-2.5">
+                        <img src={coverImageUrl} alt="Storefront cover preview" className="w-16 h-12 rounded-lg object-cover border border-slate-200 dark:border-slate-700" />
+                        <div className="flex items-center gap-1.5">
+                          <label className="px-2.5 py-1 text-[11px] font-bold bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg cursor-pointer inline-flex items-center gap-1">
+                            {uploadingSlot === 'cover' ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+                            <span>Replace</span>
+                            <input type="file" accept="image/jpeg,image/png,image/webp,image/gif" className="sr-only" onChange={handleUploadCover} />
+                          </label>
+                          <button type="button" onClick={handleRemoveCover} aria-label="Remove cover photo" className="p-1.5 text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg cursor-pointer">
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <label className="flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-lg border border-dashed border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:border-emerald-500 cursor-pointer">
+                        {uploadingSlot === 'cover' ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+                        <span>{uploadingSlot === 'cover' ? 'Uploading…' : 'Upload Cover Photo'}</span>
+                        <input type="file" accept="image/jpeg,image/png,image/webp,image/gif" className="sr-only" onChange={handleUploadCover} />
+                      </label>
+                    )}
+                  </div>
+                </div>
+
+                {/* Gallery Photos */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                      Gallery Photos ({gallery.length}/{LIMITS.businessGallery})
+                    </span>
+                    {gallery.length < LIMITS.businessGallery && (
+                      <label className="text-[11px] font-bold text-emerald-700 dark:text-emerald-400 hover:underline cursor-pointer inline-flex items-center gap-1">
+                        {uploadingSlot === 'gallery' ? <Loader2 size={12} className="animate-spin" /> : <Plus size={12} />}
+                        <span>{uploadingSlot === 'gallery' ? 'Uploading…' : 'Add Gallery Photos'}</span>
+                        <input type="file" multiple accept="image/jpeg,image/png,image/webp,image/gif" className="sr-only" onChange={handleUploadGalleryFiles} />
+                      </label>
+                    )}
+                  </div>
+                  {gallery.length > 0 && (
+                    <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+                      {gallery.map((photoUrl, idx) => (
+                        <div key={`${photoUrl}-${idx}`} className="relative group rounded-lg overflow-hidden border border-slate-200 dark:border-slate-700 h-16 bg-slate-100 dark:bg-slate-800">
+                          <img src={photoUrl} alt={`Gallery ${idx + 1}`} className="w-full h-full object-cover" />
+                          <div className="absolute inset-0 bg-black/55 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1">
+                            <label title="Replace photo" className="p-1 bg-white/90 text-slate-900 rounded cursor-pointer">
+                              {uploadingSlot === `gallery-${idx}` ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />}
+                              <input type="file" accept="image/jpeg,image/png,image/webp,image/gif" className="sr-only" onChange={(e) => handleReplaceGalleryItem(idx, e)} />
+                            </label>
+                            <button type="button" onClick={() => handleRemoveGalleryItem(idx)} aria-label={`Remove gallery photo ${idx + 1}`} className="p-1 bg-rose-600 text-white rounded cursor-pointer">
+                              <Trash2 size={11} />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   )}
                 </div>
@@ -1089,8 +1360,12 @@ const AddBusinessForm: React.FC<AddBusinessModalProps> = ({
                 disabled={submitting}
                 className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed text-white text-xs sm:text-sm font-bold px-5 py-2.5 rounded-xl flex items-center gap-2 shadow-md hover:shadow-lg transition cursor-pointer"
               >
-                {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
-                <span>{submitting ? 'Submitting…' : 'Submit for Review'}</span>
+                {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : isEditing ? <Check className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+                <span>
+                  {submitting
+                    ? (isEditing ? 'Saving…' : 'Submitting…')
+                    : (isEditing ? 'Save Changes' : 'Submit for Review')}
+                </span>
               </button>
             </div>
           </div>
@@ -1101,4 +1376,4 @@ const AddBusinessForm: React.FC<AddBusinessModalProps> = ({
 };
 
 export const AddBusinessModal: React.FC<AddBusinessModalProps> = (props) =>
-  props.isOpen ? <AddBusinessForm {...props} /> : null;
+  props.isOpen ? <AddBusinessForm key={props.initialBusiness?.id || 'create'} {...props} /> : null;

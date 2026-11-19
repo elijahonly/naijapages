@@ -1,7 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { History } from 'lucide-react';
-import { COL } from '../../lib/config';
-import { auditFromSnap, recent, useLive } from '../api';
+import { fetchAdminAuditLog, useAdminQuery } from '../api';
 import { Badge, Card, EmptyState, ErrorNote, PageHeader, SearchBox, Spinner, formatDate } from '../ui';
 
 const LABELS: Record<string, string> = {
@@ -44,7 +43,7 @@ const tone = (action: string) =>
 
 export default function Activity() {
   const [term, setTerm] = useState('');
-  const { data, loading, error } = useLive(() => recent(COL.audit, 'createdAt', 200), auditFromSnap, []);
+  const { data, loading, error } = useAdminQuery(() => fetchAdminAuditLog(200), [], []);
 
   const q = term.trim().toLowerCase();
   const rows = useMemo(

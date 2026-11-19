@@ -12,7 +12,11 @@ import {
   Building2,
   ShieldCheck,
   AlertCircle,
-  Loader2
+  Loader2,
+  Upload,
+  RefreshCw,
+  Trash2,
+  Plus
 } from 'lucide-react';
 import { 
   MarketplaceItem, 
@@ -23,6 +27,8 @@ import {
 import { STATES_DATA } from '../data/nigeriaData';
 import { MARKETPLACE_CATEGORIES } from '../data/marketplaceData';
 import { AdInput, ValidationError } from '../services/content';
+import { deleteMediaFile, extractMediaKeyFromUrl, replaceMediaFile, uploadMediaFile } from '../services/media';
+import { LIMITS } from '../lib/config';
 import { friendlyError } from '../lib/errors';
 
 interface PostAdModalProps {
@@ -101,11 +107,73 @@ const PostAdForm: React.FC<PostAdModalProps> = ({
   const [selectedLga, setSelectedLga] = useState<string>('Ikeja');
   const [locationHub, setLocationHub] = useState<string>('Computer Village, Ikeja');
   const [imageUrl, setImageUrl] = useState<string>('https://images.unsplash.com/photo-1695048133142-1a20484d2569?w=800&auto=format&fit=crop&q=80');
+  const [additionalImages, setAdditionalImages] = useState<string[]>([]);
+  const [uploadingPhoto, setUploadingPhoto] = useState<string | null>(null);
   const [phone, setPhone] = useState<string>('');
   const [whatsapp, setWhatsapp] = useState<string>('');
   const [cacNumber, setCacNumber] = useState<string>('');
   const [description, setDescription] = useState<string>('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const handleUploadMainImage = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setErrorMsg(null);
+    setUploadingPhoto('main');
+    try {
+      const existingKey = extractMediaKeyFromUrl(imageUrl);
+      const media = existingKey
+        ? await replaceMediaFile(existingKey, file, 'marketplace_image')
+        : await uploadMediaFile({ file, purpose: 'marketplace_image' });
+      setImageUrl(media.url);
+    } catch (err) {
+      setErrorMsg(friendlyError(err, 'Could not upload product photo.'));
+    } finally {
+      setUploadingPhoto(null);
+    }
+  };
+
+  const handleRemoveUploadedMainImage = async () => {
+    const prev = imageUrl;
+    setImageUrl('');
+    if (extractMediaKeyFromUrl(prev)) {
+      await deleteMediaFile(prev).catch(() => {});
+    }
+  };
+
+  const handleUploadAdditionalImages = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
+    e.target.value = '';
+    if (files.length === 0) return;
+    const remaining = LIMITS.adImages - additionalImages.length;
+    if (remaining <= 0) {
+      setErrorMsg(`You can upload up to ${LIMITS.adImages} additional product photos.`);
+      return;
+    }
+    setErrorMsg(null);
+    setUploadingPhoto('gallery');
+    try {
+      const urls: string[] = [];
+      for (const file of files.slice(0, remaining)) {
+        const media = await uploadMediaFile({ file, purpose: 'marketplace_image' });
+        urls.push(media.url);
+      }
+      setAdditionalImages((prev) => [...prev, ...urls].slice(0, LIMITS.adImages));
+    } catch (err) {
+      setErrorMsg(friendlyError(err, 'Could not upload gallery photo.'));
+    } finally {
+      setUploadingPhoto(null);
+    }
+  };
+
+  const handleRemoveAdditionalImage = async (idx: number) => {
+    const target = additionalImages[idx];
+    setAdditionalImages((prev) => prev.filter((_, i) => i !== idx));
+    if (target && extractMediaKeyFromUrl(target)) {
+      await deleteMediaFile(target).catch(() => {});
+    }
+  };
 
   // Available LGAs for chosen state
   const stateObj = STATES_DATA.find((s) => s.name.toLowerCase() === selectedState.toLowerCase());
@@ -163,6 +231,7 @@ const PostAdForm: React.FC<PostAdModalProps> = ({
         description.trim() ||
         `${title.trim()} available for inspection and immediate sale in ${selectedState}. Contact seller on WhatsApp or phone for details.`,
       imageUrl: imageUrl.trim() || 'https://images.unsplash.com/photo-1526738549149-8e07eca6c147?w=800&auto=format&fit=crop&q=80',
+      additionalImages,
       state: selectedState,
       lga: selectedLga || selectedState,
       locationHub: locationHub.trim() || undefined,
@@ -397,18 +466,103 @@ const PostAdForm: React.FC<PostAdModalProps> = ({
             </div>
           </div>
 
-          {/* Photo Preset & Image URL */}
-          <div className="space-y-2">
-            <label className="block font-bold text-slate-800 dark:text-slate-200">
-              Product Image URL
-            </label>
-            <input
-              type="url"
-              value={imageUrl}
-              onChange={(e) => setImageUrl(e.target.value)}
-              placeholder="https://images.unsplash.com/..."
-              className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-2.5 text-slate-900 dark:text-white outline-none font-mono text-xs"
-            />
+          {/* R2 Upload, Photo Preset & Image URL */}
+          <div className="space-y-3 p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <label className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                <ImageIcon className="w-4 h-4 text-emerald-600" />
+                <span>Product Photos</span>
+              </label>
+              <div className="flex items-center gap-2">
+                <label className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs cursor-pointer transition">
+                  {uploadingPhoto === 'main' ? <Loader2 size={13} className="animate-spin" /> : extractMediaKeyFromUrl(imageUrl) ? <RefreshCw size={13} /> : <Upload size={13} />}
+                  <span>
+                    {uploadingPhoto === 'main'
+                      ? 'Uploading…'
+                      : extractMediaKeyFromUrl(imageUrl)
+                        ? 'Replace Photo'
+                        : 'Upload Photo (max 5 MB)'}
+                  </span>
+                  <input type="file" accept="image/jpeg,image/png,image/webp,image/gif" className="sr-only" onChange={handleUploadMainImage} />
+                </label>
+                {extractMediaKeyFromUrl(imageUrl) && (
+                  <button
+                    type="button"
+                    onClick={handleRemoveUploadedMainImage}
+                    aria-label="Delete uploaded photo"
+                    className="p-1.5 text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg cursor-pointer"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {imageUrl && (
+              <div className="flex items-center gap-3">
+                <img
+                  src={imageUrl}
+                  alt="Selected product preview"
+                  className="w-16 h-16 rounded-lg object-cover border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 shrink-0"
+                />
+                <div className="flex-1 min-w-0">
+                  <label className="block text-[11px] font-semibold text-slate-500 dark:text-slate-400 mb-1">
+                    Or paste an external https:// image URL
+                  </label>
+                  <input
+                    type="text"
+                    value={imageUrl}
+                    onChange={(e) => setImageUrl(e.target.value)}
+                    placeholder="https://images.unsplash.com/..."
+                    className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg p-2 text-slate-900 dark:text-white outline-none font-mono text-xs"
+                  />
+                </div>
+              </div>
+            )}
+
+            {!imageUrl && (
+              <input
+                type="text"
+                value={imageUrl}
+                onChange={(e) => setImageUrl(e.target.value)}
+                placeholder="https://images.unsplash.com/... or upload a photo above"
+                className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg p-2.5 text-slate-900 dark:text-white outline-none font-mono text-xs"
+              />
+            )}
+
+            {/* Additional Gallery Photos */}
+            <div className="pt-1 border-t border-slate-200 dark:border-slate-700/70 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold text-slate-600 dark:text-slate-300">
+                  Extra Gallery Photos ({additionalImages.length}/{LIMITS.adImages})
+                </span>
+                {additionalImages.length < LIMITS.adImages && (
+                  <label className="text-[11px] font-bold text-emerald-700 dark:text-emerald-400 hover:underline cursor-pointer inline-flex items-center gap-1">
+                    {uploadingPhoto === 'gallery' ? <Loader2 size={12} className="animate-spin" /> : <Plus size={12} />}
+                    <span>{uploadingPhoto === 'gallery' ? 'Uploading…' : 'Add More Photos'}</span>
+                    <input type="file" multiple accept="image/jpeg,image/png,image/webp,image/gif" className="sr-only" onChange={handleUploadAdditionalImages} />
+                  </label>
+                )}
+              </div>
+              {additionalImages.length > 0 && (
+                <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+                  {additionalImages.map((u, idx) => (
+                    <div key={`${u}-${idx}`} className="relative group h-14 rounded-lg overflow-hidden border border-slate-200 dark:border-slate-700">
+                      <img src={u} alt={`Extra ad ${idx + 1}`} className="w-full h-full object-cover" />
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveAdditionalImage(idx)}
+                        aria-label={`Remove extra photo ${idx + 1}`}
+                        className="absolute top-1 right-1 p-1 bg-rose-600 text-white rounded opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                      >
+                        <Trash2 size={10} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
             {/* Quick Presets */}
             <div className="flex items-center gap-1.5 flex-wrap pt-1">
               <span className="text-[11px] text-slate-500 font-medium">Quick Photo Presets:</span>
@@ -502,7 +656,7 @@ const PostAdForm: React.FC<PostAdModalProps> = ({
             </button>
             <button
               type="submit"
-              disabled={submitting}
+              disabled={submitting || uploadingPhoto !== null}
               className="px-6 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed text-white font-bold shadow-md shadow-emerald-600/20 cursor-pointer transition-colors flex items-center gap-2"
             >
               {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}

@@ -2,8 +2,7 @@
  * Input hygiene shared by every form that writes user content.
  *
  * These checks are the *first* line of defence (and give friendly error
- * messages). The authoritative checks live in `firestore.rules`, which the
- * browser cannot bypass.
+ * messages). The authoritative checks live in the Cloudflare Worker API (`worker/src/lib/validation.ts`).
  */
 
 // Control characters, zero-width characters and bidi-override characters
@@ -63,6 +62,32 @@ export function safeHttpUrl(
   }
 }
 
+const SAFE_MEDIA_KEY_RE = /^[a-zA-Z0-9][a-zA-Z0-9/_-]{0,220}(\.[a-zA-Z0-9]{1,10})?$/;
+
+/**
+ * Accepts either a Worker/R2 `/api/media/<key>` delivery path or a safe `https://` URL.
+ */
+export function safeMediaUrl(
+  value: unknown,
+  opts: { max?: number; allowPrivate?: boolean } = {},
+): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const raw = value.replace(INVISIBLE, '').trim();
+  if (!raw || raw.length > (opts.max ?? 600)) return undefined;
+  if (DANGEROUS_SCHEMES.test(raw)) return undefined;
+
+  if (raw.startsWith('/api/media/')) {
+    const rest = raw.slice('/api/media/'.length);
+    if (!rest || rest.includes('..') || rest.includes('//') || rest.includes('\\')) return undefined;
+    if (rest.includes('?') || rest.includes('#')) return undefined;
+    if (!SAFE_MEDIA_KEY_RE.test(rest)) return undefined;
+    if (!opts.allowPrivate && rest.startsWith('private/')) return undefined;
+    return `/api/media/${rest}`;
+  }
+
+  return safeHttpUrl(raw, { httpsOnly: true, max: opts.max ?? 600 });
+}
+
 /**
  * Strict allow-list for Google Maps links. A loose `includes('google.')` check
  * would accept `https://google.evil.com/…`, so we match the exact hosts.
@@ -111,7 +136,7 @@ export function cleanEmail(value: unknown): string | undefined {
   return EMAIL_RE.test(v) ? v : undefined;
 }
 
-/** Recursively removes `undefined` (Firestore rejects it) and empty strings/arrays/objects. */
+/** Recursively removes `undefined` and empty strings/arrays/objects from JSON payloads. */
 export function compact<T>(input: T): T {
   if (Array.isArray(input)) {
     const arr = input.map((v) => compact(v)).filter((v) => v !== undefined);
@@ -128,7 +153,7 @@ export function compact<T>(input: T): T {
   return input === '' ? (undefined as unknown as T) : input;
 }
 
-/** Password policy for new accounts (Firebase's own minimum is only 6). */
+/** Password policy enforced for new accounts (aligned with Better Auth configuration). */
 export function passwordProblem(pw: string): string | null {
   if (pw.length < 8) return 'Use at least 8 characters.';
   if (!/[A-Za-z]/.test(pw) || !/[0-9]/.test(pw)) return 'Include at least one letter and one number.';

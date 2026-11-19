@@ -1,17 +1,19 @@
 import { useModal } from '../hooks/useModal';
 import React, { useState } from 'react';
-import { X, Copy, Check, MessageCircle, Share2, Globe, MapPin, Phone, Star } from 'lucide-react';
+import { X, Copy, Check, MessageCircle, Share2, Globe, MapPin, Phone, Star, QrCode } from 'lucide-react';
 import { Business } from '../types';
 
 interface ShareBusinessModalProps {
   business: Business | null;
   isOpen: boolean;
   onClose: () => void;
+  onOpenQr?: () => void;
 }
 
 const ShareBusiness: React.FC<ShareBusinessModalProps & { business: Business }> = ({
   business,
   onClose,
+  onOpenQr,
 }) => {
   useModal(onClose);
 
@@ -87,7 +89,22 @@ const ShareBusiness: React.FC<ShareBusinessModalProps & { business: Business }> 
 
           {/* Share Actions */}
           <div className="space-y-2 pt-1">
+            {onOpenQr && (
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  onOpenQr();
+                }}
+                className="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs py-2.5 px-4 rounded-xl flex items-center justify-center gap-2 transition cursor-pointer shadow-xs"
+              >
+                <QrCode className="w-4 h-4" />
+                <span>Generate Scannable QR Code</span>
+              </button>
+            )}
+
             <button
+              type="button"
               onClick={handleCopy}
               className="w-full bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold text-xs py-2.5 px-4 rounded-xl flex items-center justify-center gap-2 border border-slate-200 dark:border-slate-700 transition cursor-pointer"
             >

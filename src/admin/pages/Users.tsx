@@ -1,24 +1,19 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { collection } from 'firebase/firestore';
 import { Activity as ActivityIcon, ShieldCheck, ShieldOff, UserCheck, UserX, Users as UsersIcon } from 'lucide-react';
-import { db } from '../../lib/firebase';
-import { COL } from '../../lib/config';
 import { Business, MarketplaceItem } from '../../types';
 import {
   AdminRow,
+  AdminUsersPayload,
   BanRow,
   ReviewRow,
   UserRow,
-  adminFromSnap,
-  banFromSnap,
   banUser,
+  fetchAdminUsers,
   grantAdmin,
   loadUserActivity,
-  recent,
   revokeAdmin,
   unbanUser,
-  userFromSnap,
-  useLive,
+  useAdminQuery,
 } from '../api';
 import { useAdmin } from '../AdminContext';
 import { useRunner } from '../useRunner';
@@ -109,25 +104,27 @@ export default function Users() {
   const [term, setTerm] = useState('');
   const [viewing, setViewing] = useState<UserRow | null>(null);
 
-  const users = useLive(() => recent(COL.users), userFromSnap, []);
-  const bans = useLive(() => collection(db, COL.bans), banFromSnap, []);
-  const admins = useLive(() => collection(db, COL.admins), adminFromSnap, []);
+  const EMPTY_USERS: AdminUsersPayload = { users: [], bans: [], admins: [] };
+  const usersQuery = useAdminQuery(() => fetchAdminUsers(), EMPTY_USERS, []);
+  const usersList = usersQuery.data.users;
+  const bansList = usersQuery.data.bans;
+  const adminsList = usersQuery.data.admins;
 
-  const banById = useMemo(() => new Map<string, BanRow>(bans.data.map((b) => [b.id, b])), [bans.data]);
-  const adminById = useMemo(() => new Map<string, AdminRow>(admins.data.map((a) => [a.id, a])), [admins.data]);
+  const banById = useMemo(() => new Map<string, BanRow>(bansList.map((b) => [b.id, b])), [bansList]);
+  const adminById = useMemo(() => new Map<string, AdminRow>(adminsList.map((a) => [a.id, a])), [adminsList]);
 
   // Admins and suspended accounts that have no profile row (e.g. created by hand) should still be listed.
   const allRows = useMemo<UserRow[]>(() => {
-    const known = new Set(users.data.map((u) => u.id));
+    const known = new Set(usersList.map((u) => u.id));
     const extras: UserRow[] = [];
-    [...admins.data, ...bans.data].forEach((x) => {
+    [...adminsList, ...bansList].forEach((x) => {
       if (!known.has(x.id)) {
         known.add(x.id);
         extras.push({ id: x.id, email: x.email ?? '', displayName: ('name' in x && x.name) || '' });
       }
     });
-    return [...users.data, ...extras];
-  }, [users.data, admins.data, bans.data]);
+    return [...usersList, ...extras];
+  }, [usersList, adminsList, bansList]);
 
   const q = term.trim().toLowerCase();
   const rows = useMemo(
@@ -173,8 +170,8 @@ export default function Users() {
     if (r.ok) run(`admin:${u.id}`, () => revokeAdmin(admin, u), 'Admin rights removed');
   };
 
-  const loading = users.loading || bans.loading || admins.loading;
-  const error = users.error || bans.error || admins.error;
+  const loading = usersQuery.loading;
+  const error = usersQuery.error;
 
   return (
     <>
@@ -184,8 +181,8 @@ export default function Users() {
         onChange={setTab}
         items={[
           { id: 'all', label: 'All members', count: allRows.length },
-          { id: 'suspended', label: 'Suspended', count: bans.data.length },
-          { id: 'admins', label: 'Admins', count: admins.data.length },
+          { id: 'suspended', label: 'Suspended', count: bansList.length },
+          { id: 'admins', label: 'Admins', count: adminsList.length },
         ]}
       />
       <SearchBox value={term} onChange={setTerm} placeholder="Search name, email or user ID" className="mb-4 max-w-md" />

@@ -1,8 +1,7 @@
 import React, { useMemo, useState } from 'react';
-import { BadgeCheck, Check, ShieldCheck, X } from 'lucide-react';
-import { COL } from '../../lib/config';
+import { BadgeCheck, Check, ExternalLink, Paperclip, ShieldCheck, X } from 'lucide-react';
 import { ClaimRecord } from '../../types';
-import { approveClaim, claimFromSnap, recent, rejectClaim, useLive } from '../api';
+import { approveClaim, fetchAdminClaims, rejectClaim, useAdminQuery } from '../api';
 import { useAdmin } from '../AdminContext';
 import { useRunner } from '../useRunner';
 import { Badge, Btn, Card, EmptyState, ErrorNote, PageHeader, Spinner, Tabs, formatDate, statusTone, useConfirm } from '../ui';
@@ -48,6 +47,23 @@ const ClaimCard: React.FC<{ c: ClaimRecord; busy: string | null; run: ReturnType
         <div><dt className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Claimant</dt><dd className="text-slate-800 dark:text-slate-100">{c.name} · {c.role}</dd></div>
         <div><dt className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Contact</dt><dd className="text-slate-800 dark:text-slate-100 break-words"><a className="text-emerald-700 dark:text-emerald-400 hover:underline" href={`mailto:${encodeURIComponent(c.email).replace('%40', '@')}`}>{c.email}</a> · {c.phone}</dd></div>
         <div className="sm:col-span-2"><dt className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Proof provided</dt><dd className="text-slate-800 dark:text-slate-100 whitespace-pre-line break-words">{c.proofNote || 'None given'}</dd></div>
+        {c.proofAttachmentUrl && (
+          <div className="sm:col-span-2">
+            <dt className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Uploaded private document</dt>
+            <dd className="mt-1">
+              <a
+                href={c.proofAttachmentUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 text-xs font-semibold text-emerald-700 dark:text-emerald-300 hover:underline"
+              >
+                <Paperclip size={13} />
+                <span>View private proof file</span>
+                <ExternalLink size={11} />
+              </a>
+            </dd>
+          </div>
+        )}
         {c.reviewNote && <div className="sm:col-span-2"><dt className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Review note</dt><dd className="text-slate-700 dark:text-slate-300">{c.reviewNote}</dd></div>}
       </dl>
 
@@ -64,7 +80,7 @@ const ClaimCard: React.FC<{ c: ClaimRecord; busy: string | null; run: ReturnType
 export default function Claims() {
   const [tab, setTab] = useState<Tab>('pending');
   const { busy, run } = useRunner();
-  const { data, loading, error } = useLive(() => recent(COL.claims), claimFromSnap, []);
+  const { data, loading, error } = useAdminQuery(() => fetchAdminClaims(), [], []);
 
   const counts = useMemo(() => ({ pending: data.filter((c) => c.status === 'pending').length, approved: data.filter((c) => c.status === 'approved').length, rejected: data.filter((c) => c.status === 'rejected').length }), [data]);
   const rows = useMemo(() => data.filter((c) => c.status === tab), [data, tab]);
