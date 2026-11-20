@@ -90,10 +90,18 @@ function resolveTrustedOrigins(env: Bindings, baseUrl: string, request?: Request
 
 export function createAuth(env: Bindings, opts: CreateAuthOptions = {}) {
   const isProd = env.APP_ENV === 'production';
-  const secret = env.BETTER_AUTH_SECRET?.trim() || (isProd ? '' : DEV_FALLBACK_SECRET);
-  if (!secret) {
-    throw new Error('BETTER_AUTH_SECRET must be set in Cloudflare Worker secrets for production.');
+  const configuredSecret = env.BETTER_AUTH_SECRET?.trim() || '';
+  if (
+    isProd &&
+    (configuredSecret.length < 32 ||
+      configuredSecret.toLowerCase().startsWith('change-me') ||
+      configuredSecret === DEV_FALLBACK_SECRET)
+  ) {
+    throw new Error(
+      'BETTER_AUTH_SECRET must be set to a random 32+ character Cloudflare Worker secret in production.',
+    );
   }
+  const secret = configuredSecret || DEV_FALLBACK_SECRET;
 
   const db = createDb(env.DB);
   const baseURL = resolveBaseUrl(env, opts.request);

@@ -330,7 +330,7 @@ async function main() {
   }
 
   const proxy = await getPlatformProxy<Bindings>({
-    environment: isRemote ? envName : undefined,
+    environment: isRemote ? envName : 'development',
     persist: !isRemote,
   });
 

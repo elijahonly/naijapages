@@ -26,7 +26,7 @@ const JPEG_BYTES = new Uint8Array([
 const PDF_BYTES = new TextEncoder().encode('%PDF-1.4\n1 0 obj\n<<>>\nendobj\n');
 
 async function setupEnv(overrides: Partial<Bindings> = {}) {
-  const proxy = await getPlatformProxy<Bindings>({ persist: false });
+  const proxy = await getPlatformProxy<Bindings>({ environment: 'development', persist: false });
   for (const sql of MIGRATION_SQLS) {
     const statements = sql
       .split(';')

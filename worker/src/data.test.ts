@@ -15,7 +15,7 @@ const MIGRATION_SQLS = [
 ];
 
 async function setupEnv(overrides: Partial<Bindings> = {}) {
-  const proxy = await getPlatformProxy<Bindings>({ persist: false });
+  const proxy = await getPlatformProxy<Bindings>({ environment: 'development', persist: false });
   for (const sql of MIGRATION_SQLS) {
     const statements = sql
       .split(';')

@@ -244,8 +244,15 @@ export async function sha256Hex(buffer: ArrayBuffer): Promise<string> {
 /**
  * Verifies R2 bucket binding responsiveness with a zero-byte prefix list.
  */
-export async function checkR2Health(bucket: R2Bucket): Promise<R2HealthResult> {
+export async function checkR2Health(bucket: R2Bucket | undefined): Promise<R2HealthResult> {
   const started = Date.now();
+  if (!bucket) {
+    return {
+      connected: false,
+      latencyMs: 0,
+      error: 'MEDIA_BUCKET binding is not configured',
+    };
+  }
   try {
     await bucket.list({ limit: 1 });
     return { connected: true, latencyMs: Date.now() - started };

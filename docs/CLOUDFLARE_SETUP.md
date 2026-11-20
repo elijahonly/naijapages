@@ -76,7 +76,7 @@ worker/
 
 ## 2. Local Development & Testing Commands
 
-1. **Apply the initial D1 schema locally (Miniflare SQLite):**
+1. **Apply the D1 schema locally (Miniflare SQLite under `--env development`):**
    ```bash
    npm run cf:db:migrate:local
    ```
@@ -86,7 +86,7 @@ worker/
    npm run build
    ```
 
-3. **Run the Worker locally on port `8787`:**
+3. **Run the Worker locally on port `8787` (explicitly using `--env development`):**
    ```bash
    npm run cf:dev
    ```
@@ -95,10 +95,11 @@ worker/
    - `GET http://127.0.0.1:8787/api/health/bindings` — Live D1 (`schemaReady: true`), R2, and KV health check
    - `GET http://127.0.0.1:8787/api/v1/status` — Migration phase & feature flags
 
-4. **Typecheck & run Worker + Migration tests:**
+4. **Typecheck, validate Wrangler config, & run Worker + Migration tests:**
    ```bash
-   npm run lint      # Checks both frontend (tsconfig.json) and Worker (worker/tsconfig.json)
-   npm run cf:test   # Runs Worker unit/integration tests and D1+R2 migration tests via tsx --test
+   npm run lint        # Checks both frontend (tsconfig.json) and Worker (worker/tsconfig.json)
+   npm run cf:test     # Runs Worker unit/integration tests and D1+R2 migration tests via tsx --test
+   npm run cf:validate # Builds ./dist and runs `wrangler deploy --env production --dry-run`
    ```
 
 5. **Migrate Firebase Storage assets to R2 (non-destructive, local by default):**
@@ -114,19 +115,27 @@ worker/
 
 ## 3. Environment Variables & Secrets
 
-### Non-secret Variables (`wrangler.toml` `[vars]`)
-Configured per environment (`[vars]`, `[env.development.vars]`, `[env.production.vars]`):
-- `APP_ENV`: `"development"` or `"production"`
-- `APP_NAME`: `"NaijaPages"`
-- `APP_URL`: Canonical origin for the environment
-- `CORS_ORIGINS`: Comma-separated list of allowed browser origins
-- `REQUIRE_VERIFIED_EMAIL`: `"true"` or `"false"`
-- `R2_PUBLIC_BASE_URL`: Optional custom domain for public R2 media delivery (e.g. `https://media.naijapages.ng`)
+### Non-secret Variables (`wrangler.toml`)
+Environments are strictly separated in `wrangler.toml`:
+- **`[env.production]`** (and the production-safe top-level fallback):
+  - `APP_ENV = "production"`
+  - `APP_URL = "https://naijapages.ng"`
+  - `CORS_ORIGINS = "https://naijapages.ng,https://www.naijapages.ng"`
+  - `REQUIRE_VERIFIED_EMAIL = "true"`
+  - `R2_PUBLIC_BASE_URL = ""` (serves public media via same-origin `/api/media/*` until a custom R2 public domain such as `https://media.naijapages.ng` is attached)
+  - Bindings: `DB` (`naijapages-db-prod`), `MEDIA_BUCKET` (`naijapages-media-prod`), `RATE_LIMIT_KV`, `ASSETS` (`./dist`)
+- **`[env.development]`** (local dev & staging):
+  - `APP_ENV = "development"`
+  - `APP_URL = "http://localhost:3000"`
+  - `CORS_ORIGINS = "http://localhost:3000,http://127.0.0.1:3000,http://localhost:8787,http://127.0.0.1:8787"`
+  - `REQUIRE_VERIFIED_EMAIL = "true"`
+  - `R2_PUBLIC_BASE_URL = ""`
+  - Bindings: `DB` (`naijapages-db-dev`), `MEDIA_BUCKET` (`naijapages-media-dev`), `RATE_LIMIT_KV`, `ASSETS` (`./dist`)
 
 ### Worker Secrets (`.dev.vars` locally / `wrangler secret put` remotely)
 Never commit these values to git or `wrangler.toml`:
-- `BETTER_AUTH_SECRET`
-- `BETTER_AUTH_URL`
+- `BETTER_AUTH_SECRET` *(required in production — must be a random 32+ character string; placeholders and dev defaults are rejected)*
+- `BETTER_AUTH_URL` *(e.g. `https://naijapages.ng` in production)*
 - `GOOGLE_CLIENT_ID`
 - `GOOGLE_CLIENT_SECRET`
 - `TURNSTILE_SECRET_KEY`
@@ -141,61 +150,69 @@ Never commit these values to git or `wrangler.toml`:
 
 ---
 
-## 4. Required Manual Cloudflare Dashboard / CLI Configuration
+## 4. Production Deployment & Cloudflare Resource Setup
 
-Before deploying to remote `development` or `production` environments, perform these one-time setup steps with your Cloudflare account:
+Before deploying to remote `production` (or `development` staging), perform these one-time setup steps with your Cloudflare account:
 
 1. **Authenticate Wrangler CLI**
    ```bash
    npx wrangler login
+   npx wrangler whoami
    ```
-   Verify account access with `npx wrangler whoami`.
 
-2. **Create Remote D1 Databases & Update `wrangler.toml`**
+2. **Create Remote D1 Databases & Pin Their Real IDs in `wrangler.toml`**
    ```bash
-   npx wrangler d1 create naijapages-db-dev
    npx wrangler d1 create naijapages-db-prod
+   # Optional staging database:
+   npx wrangler d1 create naijapages-db-dev
    ```
-   Copy the returned `database_id` UUIDs into `[[env.development.d1_databases]]` and `[[env.production.d1_databases]]` in `wrangler.toml`.
+   Uncomment `database_id` and paste the returned production UUID into both `[[d1_databases]]` (top-level fallback) and `[[env.production.d1_databases]]` in `wrangler.toml`. If you created a staging DB, paste its UUID into `[[env.development.d1_databases]]`.
 
 3. **Create Remote R2 Buckets**
    ```bash
-   npx wrangler r2 bucket create naijapages-media-dev
    npx wrangler r2 bucket create naijapages-media-prod
+   # Optional staging bucket:
+   npx wrangler r2 bucket create naijapages-media-dev
    ```
-   *(Optional for Phase 4+)* In the Cloudflare Dashboard → **R2** → `naijapages-media-prod` → **Settings**, attach a custom public domain (e.g., `media.naijapages.ng`) and set `R2_PUBLIC_BASE_URL` in `wrangler.toml`, or continue serving via `/api/media/:key`.
+   *(Optional)* In the Cloudflare Dashboard → **R2** → `naijapages-media-prod` → **Settings**, attach a custom public domain (e.g., `media.naijapages.ng`) and set `R2_PUBLIC_BASE_URL = "https://media.naijapages.ng"` under `[env.production.vars]` (and top-level `[vars]`), or leave it empty to serve media through `/api/media/*`.
 
-4. **Create Remote KV Namespaces & Update `wrangler.toml`**
+4. **Create the Production KV Namespace for Rate Limiting & Pin Its ID**
    ```bash
-   npx wrangler kv namespace create RATE_LIMIT_KV --env development
    npx wrangler kv namespace create RATE_LIMIT_KV --env production
+   # Optional staging namespace:
+   npx wrangler kv namespace create RATE_LIMIT_KV --env development
    ```
-   Copy the returned namespace IDs into `[[env.development.kv_namespaces]]` and `[[env.production.kv_namespaces]]` in `wrangler.toml`.
+   Uncomment `id` and paste the returned production namespace ID into both `[[kv_namespaces]]` (top-level fallback) and `[[env.production.kv_namespaces]]` in `wrangler.toml`.
+   > **Note:** Never commit placeholder IDs like `00000000000000000000000000000001`. When `id` is omitted, Wrangler v4 inherits an existing binding or auto-provisions a namespace, and `worker/src/lib/kv.ts` includes a bounded in-memory rate-limit fallback for local/unprovisioned environments. Pinning the real production namespace ID ensures deterministic distributed rate limiting across edge isolates.
 
-5. **Configure Cloudflare Turnstile (for Phase 3+ forms & auth)**
-   - Cloudflare Dashboard → **Turnstile** → **Add widget** for your dev/prod domains.
-   - Save the **Site Key** (`VITE_TURNSTILE_SITE_KEY`) and **Secret Key** (`TURNSTILE_SECRET_KEY`).
+5. **Configure Cloudflare Turnstile, Google OAuth & Resend**
+   - **Turnstile**: Create a widget for `naijapages.ng` / `www.naijapages.ng` and save `VITE_TURNSTILE_SITE_KEY` + `TURNSTILE_SECRET_KEY`.
+   - **Google OAuth**: Add `https://naijapages.ng` as an authorized JavaScript origin and `https://naijapages.ng/api/auth/callback/google` as an authorized redirect URI.
+   - **Resend**: Verify your sending domain in Resend (SPF/DKIM in Cloudflare DNS).
 
-6. **Configure Google OAuth Credentials (for Phase 3+ Better Auth)**
-   - Google Cloud Console → **APIs & Services → Credentials → OAuth 2.0 Client IDs**.
-   - Add authorized JavaScript origins (`https://dev.naijapages.example.com`, `https://naijapages.ng`).
-   - Add authorized redirect URIs (`<BETTER_AUTH_URL>/api/auth/callback/google`).
-
-7. **Configure Transactional Email Domain (Resend)**
-   - Verify your sending domain (e.g., `naijapages.ng`) in Resend (DNS SPF/DKIM records in Cloudflare DNS).
-
-8. **Upload Secrets & Run Remote Migrations**
+6. **Upload Production Secrets & Run Remote D1 Migrations**
    ```bash
-   npx wrangler secret put BETTER_AUTH_SECRET --env development
-   npx wrangler secret put BETTER_AUTH_URL --env development
-   npx wrangler secret put GOOGLE_CLIENT_ID --env development
-   npx wrangler secret put GOOGLE_CLIENT_SECRET --env development
-   npx wrangler secret put TURNSTILE_SECRET_KEY --env development
-   npx wrangler secret put RESEND_API_KEY --env development
-   npx wrangler secret put EMAIL_FROM --env development
-   npx wrangler secret put BOOTSTRAP_ADMIN_EMAIL --env development
+   npx wrangler secret put BETTER_AUTH_SECRET --env production
+   npx wrangler secret put BETTER_AUTH_URL --env production
+   npx wrangler secret put GOOGLE_CLIENT_ID --env production
+   npx wrangler secret put GOOGLE_CLIENT_SECRET --env production
+   npx wrangler secret put TURNSTILE_SECRET_KEY --env production
+   npx wrangler secret put RESEND_API_KEY --env production
+   npx wrangler secret put EMAIL_FROM --env production
+   npx wrangler secret put BOOTSTRAP_ADMIN_EMAIL --env production
 
-   npm run cf:db:migrate:dev
-   npm run cf:deploy:dev
+   npm run cf:db:migrate:prod
    ```
-   Repeat with `--env production` (`cf:db:migrate:prod`, `cf:deploy:prod`) when ready for production.
+
+7. **Deploy to Production (CLI or Cloudflare Workers Git Builds)**
+   - **CLI**:
+     ```bash
+     npm run cf:validate     # Build + dry-run check
+     npm run cf:deploy:prod  # Runs: npm run build && wrangler deploy --env production
+     # (or `npm run deploy`, which runs the same production deploy command)
+     ```
+   - **Cloudflare Dashboard → Workers & Pages → Builds & Deployments**:
+     - **Build command**: `npm run build`
+     - **Deploy command**: `npx wrangler deploy --env production`
+     - *(Or set build environment variable `CLOUDFLARE_ENV=production`.)*
+

@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createApp } from './index';
-import { checkRateLimit } from './lib/kv';
+import { createAuth } from './auth';
+import { checkRateLimit, resetMemoryRateLimitStore } from './lib/kv';
 import { normalizeMediaKey } from './lib/r2';
 import { parseAllowedOrigins } from './middleware/cors';
 import type { Bindings } from './types';
@@ -260,4 +261,94 @@ test('CORS allows configured origins and omits disallowed origins', async () => 
     env,
   );
   assert.equal(blockedRes.headers.get('access-control-allow-origin'), null);
+});
+
+test('checkRateLimit enforces maxRequests via bounded memory fallback when KV is unbound', async () => {
+  resetMemoryRateLimitStore();
+  const first = await checkRateLimit(undefined, '203.0.113.10', 2, 60);
+  const second = await checkRateLimit(undefined, '203.0.113.10', 2, 60);
+  const third = await checkRateLimit(undefined, '203.0.113.10', 2, 60);
+
+  assert.equal(first.allowed, true);
+  assert.equal(first.remaining, 1);
+  assert.equal(second.allowed, true);
+  assert.equal(second.remaining, 0);
+  assert.equal(third.allowed, false);
+  assert.equal(third.remaining, 0);
+  resetMemoryRateLimitStore();
+});
+
+test('GET /api/health/bindings reports memory-fallback mode when RATE_LIMIT_KV is unbound', async () => {
+  const app = createApp();
+  const res = await app.request(
+    'http://localhost:8787/api/health/bindings',
+    {},
+    createTestBindings({ RATE_LIMIT_KV: undefined }),
+  );
+  assert.equal(res.status, 200);
+
+  const json = (await res.json()) as {
+    ok: boolean;
+    data: {
+      healthy: boolean;
+      bindings: {
+        kv: { configured: boolean; connected: boolean; mode: string };
+      };
+    };
+  };
+  assert.equal(json.ok, true);
+  assert.equal(json.data.healthy, true);
+  assert.equal(json.data.bindings.kv.configured, false);
+  assert.equal(json.data.bindings.kv.connected, false);
+  assert.equal(json.data.bindings.kv.mode, 'memory-fallback');
+});
+
+test('Production CORS allows production origins and rejects localhost origins', async () => {
+  const app = createApp();
+  const prodEnv = createTestBindings({
+    APP_ENV: 'production',
+    APP_URL: 'https://naijapages.ng',
+    CORS_ORIGINS: 'https://naijapages.ng,https://www.naijapages.ng',
+  });
+
+  const allowedRes = await app.request(
+    'https://naijapages.ng/api/health',
+    { headers: { Origin: 'https://naijapages.ng' } },
+    prodEnv,
+  );
+  assert.equal(allowedRes.headers.get('access-control-allow-origin'), 'https://naijapages.ng');
+
+  const blockedLocalhostRes = await app.request(
+    'https://naijapages.ng/api/health',
+    { headers: { Origin: 'http://localhost:3000' } },
+    prodEnv,
+  );
+  assert.equal(blockedLocalhostRes.headers.get('access-control-allow-origin'), null);
+});
+
+test('createAuth rejects missing, short, or placeholder BETTER_AUTH_SECRET in production', () => {
+  const baseProdEnv = createTestBindings({
+    APP_ENV: 'production',
+    APP_URL: 'https://naijapages.ng',
+    CORS_ORIGINS: 'https://naijapages.ng,https://www.naijapages.ng',
+  });
+
+  assert.throws(
+    () => createAuth({ ...baseProdEnv, BETTER_AUTH_SECRET: undefined }),
+    /BETTER_AUTH_SECRET must be set/,
+  );
+  assert.throws(
+    () => createAuth({ ...baseProdEnv, BETTER_AUTH_SECRET: 'too-short-secret' }),
+    /BETTER_AUTH_SECRET must be set/,
+  );
+  assert.throws(
+    () => createAuth({ ...baseProdEnv, BETTER_AUTH_SECRET: 'change-me-to-a-32-character-secret-value' }),
+    /BETTER_AUTH_SECRET must be set/,
+  );
+  assert.doesNotThrow(() =>
+    createAuth({
+      ...baseProdEnv,
+      BETTER_AUTH_SECRET: 'prod_9f8e7d6c5b4a3210fedcba9876543210abcdef123456',
+    }),
+  );
 });

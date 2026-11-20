@@ -94,7 +94,7 @@ function main() {
   if (isRemote) {
     wranglerArgs.push('--remote', '--env', envName!, '--yes');
   } else {
-    wranglerArgs.push('--local');
+    wranglerArgs.push('--env', 'development', '--local');
   }
   wranglerArgs.push('--file', sqlOutPath);
 

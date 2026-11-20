@@ -51,7 +51,10 @@ async function main() {
     expectedDataset = normalizeSnapshot(snapshot);
   }
 
-  const proxy = await getPlatformProxy<Bindings>({ persist: true });
+  const proxy = await getPlatformProxy<Bindings>({
+    environment: args.env || 'development',
+    persist: true,
+  });
   try {
     const report = await verifyD1Integrity(proxy.env.DB, expectedDataset);
     const remainingFirebaseMedia = await findRemainingFirebaseStorageRefs(proxy.env.DB);

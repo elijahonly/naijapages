@@ -9,8 +9,17 @@ export interface DbHealthResult {
 /**
  * Verifies D1 connectivity and checks whether the initial migration tables exist.
  */
-export async function checkD1Health(db: D1Database): Promise<DbHealthResult> {
+export async function checkD1Health(db: D1Database | undefined): Promise<DbHealthResult> {
   const started = Date.now();
+  if (!db) {
+    return {
+      connected: false,
+      schemaReady: false,
+      tableCount: 0,
+      latencyMs: 0,
+      error: 'DB binding is not configured',
+    };
+  }
   try {
     const ping = await db.prepare('SELECT 1 AS ok').first<{ ok: number }>();
     if (ping?.ok !== 1) {

@@ -15,7 +15,7 @@ const MIGRATION_SQLS = [
 ];
 
 async function setupD1Env(overrides: Partial<Bindings> = {}) {
-  const proxy = await getPlatformProxy<Bindings>({ persist: false });
+  const proxy = await getPlatformProxy<Bindings>({ environment: 'development', persist: false });
   // Strip SQL comments and PRAGMA before running statements via D1 exec/batch.
   for (const sql of MIGRATION_SQLS) {
     const statements = sql
