@@ -1,10 +1,9 @@
 /**
- * Public site data = bundled directory/marketplace seed data
- *                  + community listings and ads from Cloudflare D1 (/api/v1/directory/bootstrap)
- *                  − anything an admin has hidden, + admin verification flags.
+ * Public site data loaded from Cloudflare D1 (`/api/v1/directory/bootstrap`):
+ * approved member businesses, active marketplace ads, admin moderation overrides, and site settings.
  *
- * If the backend API is unreachable (offline, or Worker not running yet) the site
- * keeps working with the bundled data and exposes `error` + `refresh()` instead of crashing.
+ * If the backend API is temporarily unreachable, the context exposes `error` + `refresh()`
+ * instead of crashing.
  */
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { DEFAULT_SETTINGS } from '../lib/config';
@@ -25,9 +24,9 @@ interface DataContextType {
   settings: SiteSettings;
   communityBusinessCount: number;
   communityAdCount: number;
-  /** True once the first D1 API response (or fallback) has arrived. */
+  /** True once the first D1 API response has arrived. */
   ready: boolean;
-  /** Set when community content could not be loaded; the bundled data still works. */
+  /** Set when directory data could not be loaded from Cloudflare D1. */
   error: string | null;
   refresh: () => Promise<void>;
 }
@@ -54,7 +53,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } catch (err) {
       if ((err as { name?: string })?.name === 'AbortError') return;
       logError('load bootstrap', err);
-      setError('Some community content could not be loaded right now.');
+      setError('Directory listings could not be loaded right now.');
     } finally {
       if (!signal?.aborted) setReady(true);
     }

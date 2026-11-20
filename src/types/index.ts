@@ -66,9 +66,7 @@ export interface Business {
     linkedin?: string;
     tiktok?: string;
   };
-  /** True for procedurally generated placeholder listings bundled with the app. */
-  isSample?: boolean;
-  /** Community listings only (stored in Firestore). */
+  /** Stored in Cloudflare D1 for registered business submissions. */
   ownerId?: string;
   ownerName?: string;
   status?: ListingStatus;
@@ -131,7 +129,7 @@ export interface MarketplaceItem {
   viewsCount: number;
   postedDate: string;
   attributes?: Record<string, string>; // e.g. { "Transmission": "Automatic", "Storage": "256GB" }
-  /** Community ads only (stored in Firestore). */
+  /** Stored in Cloudflare D1 for member marketplace ads. */
   ownerId?: string;
   ownerName?: string;
   status?: AdStatus;
@@ -207,7 +205,7 @@ export interface SiteSettings {
   adsNeedApproval: boolean;
 }
 
-/** Admin moderation flags for the bundled (seed) directory/marketplace data. */
+/** Optional admin moderation flags stored in Cloudflare D1 `listing_overrides`. */
 export interface ListingOverride {
   id: string;
   kind: 'business' | 'marketplace';

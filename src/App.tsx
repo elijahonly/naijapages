@@ -263,6 +263,8 @@ export default function App({ route }: { route: Route }) {
       if (!selectedBusiness || !filteredBusinesses.some((b) => b.id === selectedBusiness.id)) {
         setSelectedBusiness(paginatedBusinesses[0]);
       }
+    } else if (selectedBusiness !== null) {
+      setSelectedBusiness(null);
     }
   }, [paginatedBusinesses, filteredBusinesses, selectedBusiness]);
 
@@ -408,7 +410,7 @@ export default function App({ route }: { route: Route }) {
       <AccountBanner />
       {dataError && (
         <div role="status" className="bg-slate-100 dark:bg-slate-900 text-slate-600 dark:text-slate-400 text-[11px] px-4 py-1.5 text-center border-b border-slate-200 dark:border-slate-800 flex items-center justify-center gap-2">
-          <span>Community listings are taking a moment to load. Showing the built-in directory for now.</span>
+          <span>Unable to load directory listings right now.</span>
           <button
             type="button"
             onClick={() => void refreshData()}
@@ -516,7 +518,7 @@ export default function App({ route }: { route: Route }) {
         <div id="listings-anchor" className="scroll-mt-20 flex flex-wrap items-center justify-between gap-3 mb-5 pb-3 border-b border-slate-200 dark:border-slate-800">
           <div className="flex items-center gap-2">
             <h2 className="text-lg sm:text-xl font-black text-slate-900 dark:text-white tracking-tight">
-              {showingBookmarksOnly ? 'Saved Bookmarks' : (selectedState ? `${selectedState} State Businesses` : 'Verified Directory Listings')}
+              {showingBookmarksOnly ? 'Saved Bookmarks' : (selectedState ? `${selectedState} State Businesses` : 'Directory Listings')}
             </h2>
             <span className="text-xs font-bold bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 px-2 py-0.5 rounded-full">
               {filteredBusinesses.length}
@@ -583,32 +585,59 @@ export default function App({ route }: { route: Route }) {
               <Building2 className="w-7 h-7" />
             </div>
 
-            <div>
-              <h3 className="font-black text-lg text-slate-900 dark:text-white">
-                No Nigerian businesses match your search
-              </h3>
-              <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1 max-w-md mx-auto">
-                We couldn't find any listings matching "{searchTerm || selectedCategory}". Try selecting another state, removing active filters, or list your business now.
-              </p>
-            </div>
+            {allBusinesses.length === 0 && !showingBookmarksOnly ? (
+              <>
+                <div>
+                  <h3 className="font-black text-lg text-slate-900 dark:text-white">
+                    No businesses listed yet
+                  </h3>
+                  <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1 max-w-md mx-auto">
+                    NaijaPages only publishes genuine businesses submitted by registered members and reviewed by our team. Be the first to add your business to the directory.
+                  </p>
+                </div>
 
-            <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
-              <button
-                onClick={handleResetFilters}
-                className="px-4 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold text-xs rounded-xl flex items-center gap-1.5 transition cursor-pointer"
-              >
-                <RotateCcw className="w-3.5 h-3.5" />
-                <span>Reset All Filters</span>
-              </button>
+                <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+                  <button
+                    onClick={openAddBusiness}
+                    className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 shadow transition cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>List Your Business</span>
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div>
+                  <h3 className="font-black text-lg text-slate-900 dark:text-white">
+                    {showingBookmarksOnly ? 'No saved businesses yet' : 'No Nigerian businesses match your search'}
+                  </h3>
+                  <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1 max-w-md mx-auto">
+                    {showingBookmarksOnly
+                      ? 'Bookmark businesses you want to return to later and they will appear here.'
+                      : `We couldn't find any listings matching "${searchTerm || selectedState || selectedCategory}". Try adjusting your filters or submit a business listing.`}
+                  </p>
+                </div>
 
-              <button
-                onClick={openAddBusiness}
-                className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 shadow transition cursor-pointer"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>List this Business in Nigeria</span>
-              </button>
-            </div>
+                <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+                  <button
+                    onClick={handleResetFilters}
+                    className="px-4 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold text-xs rounded-xl flex items-center gap-1.5 transition cursor-pointer"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>Reset All Filters</span>
+                  </button>
+
+                  <button
+                    onClick={openAddBusiness}
+                    className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 shadow transition cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>List Your Business</span>
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         ) : viewLayout === 'split' ? (
           /* Responsive Split View: Left List, Right Sticky Map */

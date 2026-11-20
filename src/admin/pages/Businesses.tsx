@@ -1,11 +1,9 @@
-import React, { useDeferredValue, useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   Building2,
   Check,
   BadgeCheck,
   ChevronDown,
-  Eye,
-  EyeOff,
   ExternalLink,
   Pencil,
   RotateCcw,
@@ -14,7 +12,7 @@ import {
   Ban,
   ShieldOff,
 } from 'lucide-react';
-import { INITIAL_BUSINESSES, CATEGORIES, STATES_DATA } from '../../data/nigeriaData';
+import { CATEGORIES, STATES_DATA } from '../../data/nigeriaData';
 import { Business } from '../../types';
 import {
   BusinessEdit,
@@ -26,14 +24,13 @@ import {
   removeBusiness,
   restoreBusiness,
   setBusinessVerified,
-  setSeedHidden,
   useAdminQuery,
 } from '../api';
 import { useAdmin } from '../AdminContext';
 import { useRunner } from '../useRunner';
 import { Badge, Btn, Card, EmptyState, ErrorNote, Field, Modal, PageHeader, SearchBox, Spinner, Tabs, inputCls, shortDate, statusTone, useConfirm } from '../ui';
 
-type Tab = 'pending' | 'approved' | 'rejected' | 'removed' | 'all' | 'builtin';
+type Tab = 'pending' | 'approved' | 'rejected' | 'removed' | 'all';
 
 const Detail: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) =>
   children ? (
@@ -242,90 +239,6 @@ const BusinessRow: React.FC<{ b: Business; busy: string | null; run: ReturnType<
 };
 
 // ---------------------------------------------------------------------------
-// Built-in directory (seed data): search, hide / restore
-// ---------------------------------------------------------------------------
-
-const BuiltIn: React.FC = () => {
-  const { admin, overrides } = useAdmin();
-  const { busy, run } = useRunner();
-  const confirm = useConfirm();
-  const [term, setTerm] = useState('');
-  const deferred = useDeferredValue(term.trim().toLowerCase());
-
-  const hidden = useMemo(() => new Map(overrides.filter((o) => o.kind === 'business' && o.hidden).map((o) => [o.id, o])), [overrides]);
-
-  const results = useMemo(() => {
-    if (deferred.length < 2) return [];
-    const out: Business[] = [];
-    for (const b of INITIAL_BUSINESSES) {
-      if (b.name.toLowerCase().includes(deferred) || b.id.toLowerCase() === deferred || b.phone.replace(/\s/g, '').includes(deferred.replace(/\s/g, ''))) {
-        out.push(b);
-        if (out.length >= 40) break;
-      }
-    }
-    return out;
-  }, [deferred]);
-
-  const hiddenList = useMemo(() => [...hidden.keys()].map((id) => INITIAL_BUSINESSES.find((b) => b.id === id)).filter((b): b is Business => !!b), [hidden]);
-
-  const toggle = async (b: Business, hide: boolean) => {
-    if (hide) {
-      const r = await confirm({ title: `Hide “${b.name}”?`, message: 'It will no longer appear anywhere on the public site. You can restore it from this page.', confirmLabel: 'Hide listing', tone: 'danger' });
-      if (!r.ok) return;
-    }
-    run(`seed:${b.id}`, () => setSeedHidden(admin, 'business', b.id, b.name, hide, hidden.get(b.id) ?? overrides.find((o) => o.kind === 'business' && o.id === b.id)), hide ? 'Listing hidden' : 'Listing restored');
-  };
-
-  const row = (b: Business) => {
-    const isHidden = hidden.has(b.id);
-    return (
-      <div key={b.id} className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
-        <div className="min-w-0">
-          <p className="font-bold text-sm text-slate-900 dark:text-white break-words">{b.name}</p>
-          <p className="text-[11px] text-slate-500 dark:text-slate-400">{b.category} · {b.lga}, {b.state} · <code>{b.id}</code></p>
-        </div>
-        <div className="flex items-center gap-2">
-          {b.isSample ? <Badge tone="amber" title="Generated placeholder listing">Sample</Badge> : <Badge tone="green">Curated</Badge>}
-          {isHidden && <Badge tone="red">Hidden</Badge>}
-          <Btn variant={isHidden ? 'primary' : 'outline'} icon={isHidden ? <Eye size={13} /> : <EyeOff size={13} />} loading={busy === `seed:${b.id}`} onClick={() => toggle(b, !isHidden)}>
-            {isHidden ? 'Restore' : 'Hide'}
-          </Btn>
-        </div>
-      </div>
-    );
-  };
-
-  return (
-    <div className="space-y-5">
-      <Card className="p-4">
-        <p className="text-sm text-slate-600 dark:text-slate-300 mb-3">
-          These are the {INITIAL_BUSINESSES.length.toLocaleString()} listings bundled with the site. You can’t edit them here, but you can <b>hide</b> any that are wrong, fake or abusive, and restore them later.
-        </p>
-        <SearchBox value={term} onChange={setTerm} placeholder="Search by business name, phone number or listing ID (2+ characters)" />
-      </Card>
-
-      {deferred.length >= 2 ? (
-        results.length ? (
-          <div className="space-y-2">
-            {results.map(row)}
-            {results.length >= 40 && <p className="text-xs text-slate-500 text-center">Showing the first 40 matches. Refine your search to narrow it down.</p>}
-          </div>
-        ) : (
-          <Card><EmptyState icon={<Building2 size={22} />} title="No built-in listings match" /></Card>
-        )
-      ) : null}
-
-      {hiddenList.length > 0 && (
-        <div>
-          <h2 className="text-sm font-extrabold text-slate-800 dark:text-slate-100 mb-2">Currently hidden ({hiddenList.length})</h2>
-          <div className="space-y-2">{hiddenList.map(row)}</div>
-        </div>
-      )}
-    </div>
-  );
-};
-
-// ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
 
@@ -367,34 +280,27 @@ export default function Businesses() {
           { id: 'rejected', label: 'Rejected', count: counts.rejected },
           { id: 'removed', label: 'Removed', count: counts.removed },
           { id: 'all', label: 'All', count: data.length },
-          { id: 'builtin', label: 'Built-in directory' },
         ]}
       />
 
-      {tab === 'builtin' ? (
-        <BuiltIn />
+      <SearchBox value={term} onChange={setTerm} placeholder="Search name, category, location, owner or phone" className="mb-4 max-w-md" />
+      {error && <ErrorNote>{error}</ErrorNote>}
+      {loading ? (
+        <Spinner />
+      ) : rows.length === 0 ? (
+        <Card>
+          <EmptyState
+            icon={<Building2 size={22} />}
+            title={tab === 'pending' ? 'Nothing waiting for review 🎉' : 'No listings here'}
+            hint={tab === 'pending' ? 'New business submissions from members will appear here.' : undefined}
+          />
+        </Card>
       ) : (
-        <>
-          <SearchBox value={term} onChange={setTerm} placeholder="Search name, category, location, owner or phone" className="mb-4 max-w-md" />
-          {error && <ErrorNote>{error}</ErrorNote>}
-          {loading ? (
-            <Spinner />
-          ) : rows.length === 0 ? (
-            <Card>
-              <EmptyState
-                icon={<Building2 size={22} />}
-                title={tab === 'pending' ? 'Nothing waiting for review 🎉' : 'No listings here'}
-                hint={tab === 'pending' ? 'New business submissions from members will appear here.' : undefined}
-              />
-            </Card>
-          ) : (
-            <div className="space-y-3">
-              {rows.map((b) => (
-                <BusinessRow key={b.id} b={b} busy={busy} run={run} />
-              ))}
-            </div>
-          )}
-        </>
+        <div className="space-y-3">
+          {rows.map((b) => (
+            <BusinessRow key={b.id} b={b} busy={busy} run={run} />
+          ))}
+        </div>
       )}
     </>
   );

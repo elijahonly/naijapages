@@ -10,8 +10,6 @@ import { LIMITS } from '../lib/config';
 import { ADMIN_DATA_EVENT, apiFetch, emitAdminRefresh, emitDataRefresh } from '../lib/apiClient';
 import { friendlyError, logError } from '../lib/errors';
 import { cleanEmail, cleanMultiline, cleanPhone, cleanText, safeHttpUrl } from '../lib/security';
-import { INITIAL_BUSINESSES } from '../data/nigeriaData';
-import { INITIAL_MARKETPLACE_ITEMS } from '../data/marketplaceData';
 import { Business, ClaimRecord, ListingOverride, MarketplaceItem, ReportRecord, SiteSettings } from '../types';
 
 export interface AdminCtx {
@@ -135,22 +133,6 @@ export const fetchAdminAuditLog = async (limit = 200): Promise<AuditRow[]> =>
 
 export const fetchAdminSettings = async (): Promise<SiteSettings> =>
   (await apiFetch<{ settings: SiteSettings }>('/api/v1/admin/settings')).settings;
-
-// ---------------------------------------------------------------------------
-// Seed (built-in) data lookups
-// ---------------------------------------------------------------------------
-
-let seedBizIndex: Map<string, Business> | null = null;
-let seedAdIndex: Map<string, MarketplaceItem> | null = null;
-
-export const seedBusiness = (id: string): Business | undefined => {
-  seedBizIndex ??= new Map(INITIAL_BUSINESSES.map((b) => [b.id, b]));
-  return seedBizIndex.get(id);
-};
-export const seedAd = (id: string): MarketplaceItem | undefined => {
-  seedAdIndex ??= new Map(INITIAL_MARKETPLACE_ITEMS.map((a) => [a.id, a]));
-  return seedAdIndex.get(id);
-};
 
 export const overrideDocId = (kind: 'business' | 'marketplace', id: string) => `${kind}_${id}`;
 
@@ -349,7 +331,7 @@ interface ServerTargetResponse {
   };
 }
 
-/** Looks up the reported item. Authoritative ownership comes from D1 or bundled seed lookups. */
+/** Looks up the reported item from Cloudflare D1. */
 export async function loadTarget(report: ReportRecord): Promise<TargetInfo> {
   try {
     const { target } = await apiFetch<ServerTargetResponse>(
@@ -365,16 +347,6 @@ export async function loadTarget(report: ReportRecord): Promise<TargetInfo> {
         excerpt: target.excerpt,
         ownerIsAdmin: target.ownerIsAdmin === true,
       };
-    }
-    if (target.kind === 'not_in_d1') {
-      if (report.targetType === 'business') {
-        const seed = seedBusiness(report.targetId);
-        return seed ? { kind: 'builtin', title: seed.name, excerpt: seed.description, ownerIsAdmin: false } : { kind: 'missing', title: report.targetTitle, ownerIsAdmin: false };
-      }
-      if (report.targetType === 'ad') {
-        const seed = seedAd(report.targetId);
-        return seed ? { kind: 'builtin', title: seed.title, excerpt: seed.description, ownerIsAdmin: false } : { kind: 'missing', title: report.targetTitle, ownerIsAdmin: false };
-      }
     }
     return { kind: 'missing', title: target.title || report.targetTitle, ownerIsAdmin: false };
   } catch (err) {

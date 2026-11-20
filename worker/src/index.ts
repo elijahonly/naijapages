@@ -6,7 +6,11 @@ import { authRoutes } from './routes/auth';
 import { healthRoutes } from './routes/health';
 import { mediaRoutes } from './routes/media';
 import { v1Routes } from './routes/v1';
-import type { AppEnv } from './types';
+import {
+  handleDiscoveryQueueBatch,
+  handleDiscoveryScheduled,
+} from './services/discovery';
+import type { AppEnv, Bindings, DiscoveryQueueMessage } from './types';
 
 export function createApp(): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
@@ -50,4 +54,16 @@ export function createApp(): Hono<AppEnv> {
 
 const app = createApp();
 
-export default app;
+const worker: ExportedHandler<Bindings, DiscoveryQueueMessage> = {
+  fetch(request, env, ctx) {
+    return app.fetch(request, env, ctx);
+  },
+  async queue(batch, env, ctx) {
+    await handleDiscoveryQueueBatch(batch, env, ctx);
+  },
+  async scheduled(controller, env, ctx) {
+    ctx.waitUntil(handleDiscoveryScheduled(controller, env, ctx));
+  },
+};
+
+export default worker;

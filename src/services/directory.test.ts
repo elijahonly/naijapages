@@ -156,3 +156,24 @@ test('computeZoneCounts and computeStateCounts summarize listings accurately', (
   assert.equal(states.Lagos, 1);
   assert.equal(states.FCT, 1);
 });
+
+test('bundled directory and marketplace datasets contain zero synthetic records', async () => {
+  const { INITIAL_BUSINESSES, STATES_DATA } = await import('../data/nigeriaData');
+  const { INITIAL_MARKETPLACE_ITEMS } = await import('../data/marketplaceData');
+
+  assert.equal(INITIAL_BUSINESSES.length, 0);
+  assert.equal(INITIAL_MARKETPLACE_ITEMS.length, 0);
+  assert.equal(STATES_DATA.length, 37);
+
+  const mergedBiz = mergeCommunityAndSeedBusinesses([], [], INITIAL_BUSINESSES);
+  const mergedAds = mergeCommunityAndSeedAds([], [], [], INITIAL_MARKETPLACE_ITEMS);
+  assert.equal(mergedBiz.length, 0);
+  assert.equal(mergedAds.length, 0);
+
+  const filtered = filterAndSortBusinesses(mergedBiz, DEFAULT_FILTERS, SAMPLE_ZONE_MAP);
+  const zones = computeZoneCounts(mergedBiz, SAMPLE_ZONE_MAP);
+  const states = computeStateCounts(mergedBiz);
+  assert.equal(filtered.length, 0);
+  assert.equal(Object.values(zones).reduce((sum, n) => sum + n, 0), 0);
+  assert.deepEqual(states, {});
+});

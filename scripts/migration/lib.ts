@@ -551,7 +551,9 @@ export function normalizeSnapshot(snapshot: FirestoreExportSnapshot): Normalized
     };
   });
 
-  const businesses = c.businesses.map((b) => {
+  const businesses = c.businesses
+    .filter((b) => b.isSample !== true && !/^(?:sample-|gen-|mock-|dummy-|placeholder-)|-gen-\d+$/i.test(b.id))
+    .map((b) => {
     const category = asStr(b.category, 'Services');
     const createdAt = toMillis(b.createdAt, now);
     const agg = reviewAgg.get(b.id);
@@ -608,7 +610,13 @@ export function normalizeSnapshot(snapshot: FirestoreExportSnapshot): Normalized
 
   const businessIdSet = new Set(businesses.map((b) => b.id));
 
-  const marketplaceItems = c.marketplace_items.map((a) => {
+  const marketplaceItems = c.marketplace_items
+    .filter(
+      (a) =>
+        a.isSample !== true &&
+        !/^(?:sample-|gen-|mock-|dummy-|placeholder-|mkt-(?:[1-9]|1[0-2]))$/i.test(a.id),
+    )
+    .map((a) => {
     const category = asStr(a.category, 'Electronics & Appliances');
     const createdAt = toMillis(a.createdAt, now);
     const rawBusinessId = asOptStr(a.businessId);

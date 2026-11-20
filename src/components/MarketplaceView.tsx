@@ -135,9 +135,9 @@ export const MarketplaceView: React.FC<MarketplaceViewProps> = ({
         <div className="relative z-10 max-w-3xl space-y-3">
           <div className="inline-flex items-center gap-2 bg-emerald-950/70 text-emerald-300 text-xs font-bold px-3 py-1 rounded-full border border-emerald-500/30">
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
-            <span>Verified Nigerian Marketplace</span>
+            <span>Nigerian Marketplace</span>
             <span>•</span>
-            <span>Verified Merchants & Direct Sellers</span>
+            <span>Member Merchants &amp; Direct Sellers</span>
           </div>
 
           <h1 className="text-2xl sm:text-4xl font-black tracking-tight leading-tight">
@@ -356,28 +356,51 @@ export const MarketplaceView: React.FC<MarketplaceViewProps> = ({
           <div className="w-12 h-12 rounded-2xl bg-amber-100 dark:bg-amber-950 text-amber-600 flex items-center justify-center mx-auto text-xl">
             🛍️
           </div>
-          <div>
-            <h3 className="font-bold text-base text-slate-900 dark:text-white">
-              No marketplace items match your search
-            </h3>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-              Try clearing filters or be the first seller to list an item in this category or location.
-            </p>
-          </div>
-          <div className="flex items-center justify-center gap-2 pt-2">
-            <button
-              onClick={resetFilters}
-              className="text-xs font-bold text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 px-3.5 py-2 rounded-lg cursor-pointer"
-            >
-              Reset Filters
-            </button>
-            <button
-              onClick={onOpenPostAd}
-              className="text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 px-4 py-2 rounded-lg shadow-sm cursor-pointer"
-            >
-              Post an Ad for This
-            </button>
-          </div>
+          {items.length === 0 ? (
+            <>
+              <div>
+                <h3 className="font-bold text-base text-slate-900 dark:text-white">
+                  No marketplace listings yet
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                  All ads on NaijaPages Marketplace are posted by registered members. Be the first to post an item for sale.
+                </p>
+              </div>
+              <div className="flex items-center justify-center gap-2 pt-2">
+                <button
+                  onClick={onOpenPostAd}
+                  className="text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 px-4 py-2.5 rounded-lg shadow-sm cursor-pointer"
+                >
+                  Post Free Ad
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div>
+                <h3 className="font-bold text-base text-slate-900 dark:text-white">
+                  No marketplace items match your search
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                  Try clearing filters or be the first seller to list an item in this category or location.
+                </p>
+              </div>
+              <div className="flex items-center justify-center gap-2 pt-2">
+                <button
+                  onClick={resetFilters}
+                  className="text-xs font-bold text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 px-3.5 py-2 rounded-lg cursor-pointer"
+                >
+                  Reset Filters
+                </button>
+                <button
+                  onClick={onOpenPostAd}
+                  className="text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 px-4 py-2 rounded-lg shadow-sm cursor-pointer"
+                >
+                  Post an Ad for This
+                </button>
+              </div>
+            </>
+          )}
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">

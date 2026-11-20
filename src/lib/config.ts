@@ -22,13 +22,6 @@ export const FEATURED_BUSINESS_COUNT = 12;
 /** How many marketplace ads are pinned as "TOP" each day. */
 export const FEATURED_AD_COUNT = 8;
 
-/**
- * The bundled directory contains ~36,500 procedurally generated placeholder
- * listings (flagged `isSample`). They stay searchable, but are kept out of the
- * Featured spotlight unless you flip this to `true`.
- */
-export const FEATURED_INCLUDE_SAMPLE_LISTINGS = false;
-
 // --- Data loading ---------------------------------------------------------
 
 /** Max community businesses / ads fetched for the public site. */

@@ -1,13 +1,12 @@
-import React, { useDeferredValue, useMemo, useState } from 'react';
-import { Ban, Check, ChevronDown, Eye, EyeOff, ExternalLink, RotateCcw, ShoppingBag, Trash2, BadgeCheck } from 'lucide-react';
-import { INITIAL_MARKETPLACE_ITEMS } from '../../data/marketplaceData';
+import React, { useMemo, useState } from 'react';
+import { Ban, Check, ChevronDown, ExternalLink, RotateCcw, ShoppingBag, Trash2, BadgeCheck } from 'lucide-react';
 import { MarketplaceItem } from '../../types';
-import { approveAd, deleteAdForever, fetchAdminAds, removeAd, restoreAd, setSeedHidden, useAdminQuery } from '../api';
+import { approveAd, deleteAdForever, fetchAdminAds, removeAd, restoreAd, useAdminQuery } from '../api';
 import { useAdmin } from '../AdminContext';
 import { useRunner } from '../useRunner';
 import { Badge, Btn, Card, EmptyState, ErrorNote, PageHeader, SearchBox, Spinner, Tabs, shortDate, statusTone, useConfirm } from '../ui';
 
-type Tab = 'active' | 'pending' | 'removed' | 'all' | 'builtin';
+type Tab = 'active' | 'pending' | 'removed' | 'all';
 
 const naira = (n: number) => `₦${n.toLocaleString('en-NG')}`;
 
@@ -90,67 +89,6 @@ const AdRow: React.FC<{ a: MarketplaceItem; busy: string | null; run: ReturnType
   );
 };
 
-const BuiltIn: React.FC = () => {
-  const { admin, overrides } = useAdmin();
-  const { busy, run } = useRunner();
-  const confirm = useConfirm();
-  const [term, setTerm] = useState('');
-  const deferred = useDeferredValue(term.trim().toLowerCase());
-
-  const hidden = useMemo(() => new Set(overrides.filter((o) => o.kind === 'marketplace' && o.hidden).map((o) => o.id)), [overrides]);
-
-  const results = useMemo(() => {
-    if (deferred.length < 2) return [];
-    return INITIAL_MARKETPLACE_ITEMS.filter((i) => i.title.toLowerCase().includes(deferred) || i.businessName.toLowerCase().includes(deferred) || i.id.toLowerCase() === deferred).slice(0, 40);
-  }, [deferred]);
-
-  const hiddenList = useMemo(() => INITIAL_MARKETPLACE_ITEMS.filter((i) => hidden.has(i.id)), [hidden]);
-
-  const toggle = async (a: MarketplaceItem, hide: boolean) => {
-    if (hide) {
-      const r = await confirm({ title: `Hide “${a.title}”?`, message: 'It will no longer appear on the Marketplace. You can restore it from this page.', confirmLabel: 'Hide ad', tone: 'danger' });
-      if (!r.ok) return;
-    }
-    run(`seed:${a.id}`, () => setSeedHidden(admin, 'marketplace', a.id, a.title, hide, overrides.find((o) => o.kind === 'marketplace' && o.id === a.id)), hide ? 'Ad hidden' : 'Ad restored');
-  };
-
-  const row = (a: MarketplaceItem) => {
-    const isHidden = hidden.has(a.id);
-    return (
-      <div key={a.id} className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
-        <div className="min-w-0">
-          <p className="font-bold text-sm text-slate-900 dark:text-white break-words">{a.title}</p>
-          <p className="text-[11px] text-slate-500 dark:text-slate-400">{naira(a.price)} · {a.businessName} · {a.lga}, {a.state} · <code>{a.id}</code></p>
-        </div>
-        <div className="flex items-center gap-2">
-          {isHidden && <Badge tone="red">Hidden</Badge>}
-          <Btn variant={isHidden ? 'primary' : 'outline'} icon={isHidden ? <Eye size={13} /> : <EyeOff size={13} />} loading={busy === `seed:${a.id}`} onClick={() => toggle(a, !isHidden)}>
-            {isHidden ? 'Restore' : 'Hide'}
-          </Btn>
-        </div>
-      </div>
-    );
-  };
-
-  return (
-    <div className="space-y-5">
-      <Card className="p-4">
-        <p className="text-sm text-slate-600 dark:text-slate-300 mb-3">
-          These are the {INITIAL_MARKETPLACE_ITEMS.length.toLocaleString()} sample ads bundled with the site. You can hide any of them and restore them later.
-        </p>
-        <SearchBox value={term} onChange={setTerm} placeholder="Search by ad title, seller name or ad ID (2+ characters)" />
-      </Card>
-      {deferred.length >= 2 && (results.length ? <div className="space-y-2">{results.map(row)}</div> : <Card><EmptyState icon={<ShoppingBag size={22} />} title="No built-in ads match" /></Card>)}
-      {hiddenList.length > 0 && (
-        <div>
-          <h2 className="text-sm font-extrabold text-slate-800 dark:text-slate-100 mb-2">Currently hidden ({hiddenList.length})</h2>
-          <div className="space-y-2">{hiddenList.map(row)}</div>
-        </div>
-      )}
-    </div>
-  );
-};
-
 export default function Marketplace() {
   const [tab, setTab] = useState<Tab>('active');
   const [term, setTerm] = useState('');
@@ -189,30 +127,23 @@ export default function Marketplace() {
           { id: 'pending', label: 'Pending', count: counts.pending, alert: true },
           { id: 'removed', label: 'Removed', count: counts.removed },
           { id: 'all', label: 'All', count: data.length },
-          { id: 'builtin', label: 'Built-in ads' },
         ]}
       />
 
-      {tab === 'builtin' ? (
-        <BuiltIn />
+      <SearchBox value={term} onChange={setTerm} placeholder="Search title, seller, location or phone" className="mb-4 max-w-md" />
+      {error && <ErrorNote>{error}</ErrorNote>}
+      {loading ? (
+        <Spinner />
+      ) : rows.length === 0 ? (
+        <Card>
+          <EmptyState icon={<ShoppingBag size={22} />} title="No ads here" hint={tab === 'pending' ? 'Ads waiting for approval appear here when “ads need approval” is on.' : undefined} />
+        </Card>
       ) : (
-        <>
-          <SearchBox value={term} onChange={setTerm} placeholder="Search title, seller, location or phone" className="mb-4 max-w-md" />
-          {error && <ErrorNote>{error}</ErrorNote>}
-          {loading ? (
-            <Spinner />
-          ) : rows.length === 0 ? (
-            <Card>
-              <EmptyState icon={<ShoppingBag size={22} />} title="No ads here" hint={tab === 'pending' ? 'Ads waiting for approval appear here when “ads need approval” is on.' : undefined} />
-            </Card>
-          ) : (
-            <div className="space-y-3">
-              {rows.map((a) => (
-                <AdRow key={a.id} a={a} busy={busy} run={run} />
-              ))}
-            </div>
-          )}
-        </>
+        <div className="space-y-3">
+          {rows.map((a) => (
+            <AdRow key={a.id} a={a} busy={busy} run={run} />
+          ))}
+        </div>
       )}
     </>
   );

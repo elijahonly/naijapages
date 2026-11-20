@@ -1,5 +1,6 @@
+import { sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
-import { integer, real, sqliteTable, text } from 'drizzle-orm/sqlite-core';
+import { index, integer, real, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 
 export const user = sqliteTable('user', {
   id: text('id').primaryKey(),
@@ -296,6 +297,177 @@ export const mediaObjects = sqliteTable('media_objects', {
   updatedAt: integer('updated_at').notNull(),
 });
 
+export const discoverySources = sqliteTable(
+  'discovery_sources',
+  {
+    id: text('id').primaryKey(),
+    name: text('name').notNull(),
+    sourceType: text('source_type').notNull(),
+    baseUrl: text('base_url').notNull(),
+    description: text('description'),
+    licenceName: text('licence_name').notNull(),
+    licenceUrl: text('licence_url'),
+    attributionText: text('attribution_text'),
+    permittedUsage: text('permitted_usage'),
+    permissionStatus: text('permission_status').notNull().default('pending_review'),
+    enabled: integer('enabled', { mode: 'boolean' }).notNull().default(false),
+    rateLimitPerMinute: integer('rate_limit_per_minute').notNull().default(30),
+    lastSuccessfulSync: integer('last_successful_sync'),
+    lastFailedSync: integer('last_failed_sync'),
+    lastError: text('last_error'),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (table) => [
+    index('idx_discovery_sources_status_enabled').on(table.permissionStatus, table.enabled),
+    index('idx_discovery_sources_type').on(table.sourceType),
+  ],
+);
+
+export const discoveryJobs = sqliteTable(
+  'discovery_jobs',
+  {
+    id: text('id').primaryKey(),
+    sourceId: text('source_id')
+      .notNull()
+      .references(() => discoverySources.id, { onDelete: 'restrict' }),
+    jobType: text('job_type').notNull(),
+    country: text('country').notNull().default('Nigeria'),
+    state: text('state'),
+    lga: text('lga'),
+    town: text('town'),
+    category: text('category'),
+    geographicFilterJson: text('geographic_filter_json').notNull().default('{}'),
+    searchParametersJson: text('search_parameters_json').notNull().default('{}'),
+    status: text('status').notNull().default('queued'),
+    priority: integer('priority').notNull().default(100),
+    idempotencyKey: text('idempotency_key'),
+    attempts: integer('attempts').notNull().default(0),
+    discoveredCount: integer('discovered_count').notNull().default(0),
+    acceptedCount: integer('accepted_count').notNull().default(0),
+    rejectedCount: integer('rejected_count').notNull().default(0),
+    duplicateCount: integer('duplicate_count').notNull().default(0),
+    errorCount: integer('error_count').notNull().default(0),
+    errorMessage: text('error_message'),
+    createdAt: integer('created_at').notNull(),
+    startedAt: integer('started_at'),
+    completedAt: integer('completed_at'),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (table) => [
+    uniqueIndex('idx_discovery_jobs_idempotency_key')
+      .on(table.idempotencyKey)
+      .where(sql`${table.idempotencyKey} IS NOT NULL`),
+    index('idx_discovery_jobs_next_queue').on(table.status, table.priority, table.createdAt),
+    index('idx_discovery_jobs_status_created').on(table.status, table.createdAt),
+    index('idx_discovery_jobs_source_status').on(table.sourceId, table.status, table.createdAt),
+    index('idx_discovery_jobs_geo_category').on(table.state, table.lga, table.category),
+  ],
+);
+
+export const discoveredBusinesses = sqliteTable(
+  'discovered_businesses',
+  {
+    id: text('id').primaryKey(),
+    sourceId: text('source_id')
+      .notNull()
+      .references(() => discoverySources.id, { onDelete: 'restrict' }),
+    sourceRecordId: text('source_record_id').notNull(),
+    sourceRecordType: text('source_record_type'),
+    sourceUrl: text('source_url'),
+    name: text('name').notNull(),
+    normalizedName: text('normalized_name').notNull(),
+    category: text('category'),
+    subcategory: text('subcategory'),
+    country: text('country').notNull().default('Nigeria'),
+    state: text('state'),
+    lga: text('lga'),
+    city: text('city'),
+    address: text('address'),
+    phone: text('phone'),
+    secondaryPhone: text('secondary_phone'),
+    email: text('email'),
+    website: text('website'),
+    latitude: real('latitude'),
+    longitude: real('longitude'),
+    openingHours: text('opening_hours'),
+    description: text('description'),
+    rawSourceDataJson: text('raw_source_data_json').notNull().default('{}'),
+    normalizedDataJson: text('normalized_data_json').notNull().default('{}'),
+    identityHash: text('identity_hash'),
+    confidenceScore: real('confidence_score').notNull().default(0),
+    verificationStatus: text('verification_status').notNull().default('unverified'),
+    reviewStatus: text('review_status').notNull().default('discovered'),
+    firstSeenAt: integer('first_seen_at').notNull(),
+    lastSeenAt: integer('last_seen_at').notNull(),
+    lastCheckedAt: integer('last_checked_at'),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (table) => [
+    uniqueIndex('idx_discovered_businesses_source_record').on(table.sourceId, table.sourceRecordId),
+    index('idx_discovered_businesses_review_status').on(
+      table.reviewStatus,
+      table.confidenceScore,
+      table.updatedAt,
+    ),
+    index('idx_discovered_businesses_verification_status').on(
+      table.verificationStatus,
+      table.reviewStatus,
+    ),
+    index('idx_discovered_businesses_state_lga_status').on(
+      table.state,
+      table.lga,
+      table.reviewStatus,
+    ),
+    index('idx_discovered_businesses_geo_coords').on(table.latitude, table.longitude),
+    index('idx_discovered_businesses_category_state').on(
+      table.category,
+      table.state,
+      table.reviewStatus,
+    ),
+    index('idx_discovered_businesses_identity_hash').on(table.identityHash),
+    index('idx_discovered_businesses_normalized_name_state').on(table.normalizedName, table.state),
+  ],
+);
+
+export const businessEvidence = sqliteTable(
+  'business_evidence',
+  {
+    id: text('id').primaryKey(),
+    discoveredBusinessId: text('discovered_business_id')
+      .notNull()
+      .references(() => discoveredBusinesses.id, { onDelete: 'cascade' }),
+    sourceId: text('source_id')
+      .notNull()
+      .references(() => discoverySources.id, { onDelete: 'restrict' }),
+    evidenceType: text('evidence_type').notNull(),
+    fieldName: text('field_name').notNull(),
+    evidenceValue: text('evidence_value'),
+    sourceUrl: text('source_url'),
+    sourceRecordId: text('source_record_id'),
+    sourceTimestamp: integer('source_timestamp'),
+    collectedAt: integer('collected_at').notNull(),
+    confidence: real('confidence').notNull().default(0),
+    licenceReference: text('licence_reference'),
+    attributionText: text('attribution_text'),
+    notes: text('notes'),
+    createdAt: integer('created_at').notNull(),
+  },
+  (table) => [
+    index('idx_business_evidence_candidate_collected').on(
+      table.discoveredBusinessId,
+      table.collectedAt,
+    ),
+    index('idx_business_evidence_candidate_field').on(
+      table.discoveredBusinessId,
+      table.fieldName,
+      table.collectedAt,
+    ),
+    index('idx_business_evidence_source_record').on(table.sourceId, table.sourceRecordId),
+  ],
+);
+
 export const schema = {
   user,
   session,
@@ -316,6 +488,10 @@ export const schema = {
   siteSettings,
   auditLog,
   mediaObjects,
+  discoverySources,
+  discoveryJobs,
+  discoveredBusinesses,
+  businessEvidence,
 };
 
 export function createDb(d1: D1Database) {

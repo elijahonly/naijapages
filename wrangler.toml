@@ -28,6 +28,19 @@ REQUIRE_VERIFIED_EMAIL = "true"
 # Leave empty to serve public media from same-origin `/api/media/*` until a
 # custom R2 public domain (e.g. "https://media.naijapages.ng") is attached.
 R2_PUBLIC_BASE_URL = ""
+# Business discovery controls — disabled by default so deploys never start discovery automatically.
+DISCOVERY_ENABLED = "false"
+DISCOVERY_SCHEDULER_ENABLED = "false"
+DISCOVERY_DRY_RUN = "true"
+DISCOVERY_MAX_JOBS_PER_RUN = "5"
+DISCOVERY_MAX_ATTEMPTS = "3"
+DISCOVERY_STALE_JOB_TIMEOUT_MS = "900000"
+DISCOVERY_MAX_QUEUED_BACKLOG = "100"
+# OpenStreetMap Overpass connector — leave empty until a permitted endpoint is configured.
+OSM_OVERPASS_URL = ""
+OSM_USER_AGENT = "NaijaPagesDiscovery/1.0 (+https://naijapages.ng)"
+OSM_REQUEST_TIMEOUT_MS = "20000"
+OSM_MAX_RESPONSE_BYTES = "5242880"
 
 [[d1_databases]]
 binding = "DB"
@@ -44,6 +57,25 @@ bucket_name = "naijapages-media-prod"
 binding = "RATE_LIMIT_KV"
 id = "22171198a39c4af889b31523b9a204f0"
 
+# Discovery queue producer & consumer (production-safe fallback).
+[[queues.producers]]
+binding = "DISCOVERY_QUEUE"
+queue = "naijapages-discovery"
+
+[[queues.consumers]]
+queue = "naijapages-discovery"
+max_batch_size = 5
+max_batch_timeout = 15
+max_retries = 3
+retry_delay = 60
+dead_letter_queue = "naijapages-discovery-dlq"
+max_concurrency = 2
+
+# Cloudflare Cron Triggers always execute in UTC.
+# 01:00 UTC = 02:00 Africa/Lagos (WAT, UTC+1 year-round; Nigeria does not observe DST).
+[triggers]
+crons = ["0 1 * * *"]
+
 # -----------------------------------------------------------------------------
 # Production Environment (`wrangler deploy --env production`)
 # -----------------------------------------------------------------------------
@@ -59,6 +91,18 @@ REQUIRE_VERIFIED_EMAIL = "true"
 # Leave empty to serve public media via `/api/media/*`, or set to your connected
 # R2 custom domain (e.g. "https://media.naijapages.ng").
 R2_PUBLIC_BASE_URL = ""
+# Business discovery controls — disabled by default; requires explicit opt-in.
+DISCOVERY_ENABLED = "false"
+DISCOVERY_SCHEDULER_ENABLED = "false"
+DISCOVERY_DRY_RUN = "true"
+DISCOVERY_MAX_JOBS_PER_RUN = "5"
+DISCOVERY_MAX_ATTEMPTS = "3"
+DISCOVERY_STALE_JOB_TIMEOUT_MS = "900000"
+DISCOVERY_MAX_QUEUED_BACKLOG = "100"
+OSM_OVERPASS_URL = ""
+OSM_USER_AGENT = "NaijaPagesDiscovery/1.0 (+https://naijapages.ng)"
+OSM_REQUEST_TIMEOUT_MS = "20000"
+OSM_MAX_RESPONSE_BYTES = "5242880"
 
 [[env.production.d1_databases]]
 binding = "DB"
@@ -74,11 +118,28 @@ bucket_name = "naijapages-media-prod"
 binding = "RATE_LIMIT_KV"
 id = "22171198a39c4af889b31523b9a204f0"
 
+[[env.production.queues.producers]]
+binding = "DISCOVERY_QUEUE"
+queue = "naijapages-discovery"
+
+[[env.production.queues.consumers]]
+queue = "naijapages-discovery"
+max_batch_size = 5
+max_batch_timeout = 15
+max_retries = 3
+retry_delay = 60
+dead_letter_queue = "naijapages-discovery-dlq"
+max_concurrency = 2
+
+# 01:00 UTC = 02:00 Africa/Lagos (WAT, UTC+1).
+[env.production.triggers]
+crons = ["0 1 * * *"]
+
 # -----------------------------------------------------------------------------
 # Development Environment (`--env development`)
 # Used for local development (`npm run cf:dev`, `npm run cf:db:migrate:local`)
 # and isolated staging deploys (`npm run cf:deploy:dev`).
-# Never shares D1, R2, KV, or CORS configuration with production.
+# Never shares D1, R2, KV, Queues, or CORS configuration with production.
 # -----------------------------------------------------------------------------
 [env.development]
 name = "naijapages-dev"
@@ -90,6 +151,18 @@ APP_URL = "http://localhost:3000"
 CORS_ORIGINS = "http://localhost:3000,http://127.0.0.1:3000,http://localhost:8787,http://127.0.0.1:8787"
 REQUIRE_VERIFIED_EMAIL = "true"
 R2_PUBLIC_BASE_URL = ""
+DISCOVERY_ENABLED = "false"
+DISCOVERY_SCHEDULER_ENABLED = "false"
+DISCOVERY_DRY_RUN = "true"
+DISCOVERY_MAX_JOBS_PER_RUN = "5"
+DISCOVERY_MAX_ATTEMPTS = "3"
+DISCOVERY_STALE_JOB_TIMEOUT_MS = "900000"
+DISCOVERY_MAX_QUEUED_BACKLOG = "100"
+# For small local pilots, set a permitted Overpass endpoint in .dev.vars or override here.
+OSM_OVERPASS_URL = ""
+OSM_USER_AGENT = "NaijaPagesDiscovery/1.0 (+https://naijapages.ng)"
+OSM_REQUEST_TIMEOUT_MS = "20000"
+OSM_MAX_RESPONSE_BYTES = "5242880"
 
 [[env.development.d1_databases]]
 binding = "DB"
@@ -107,3 +180,20 @@ preview_bucket_name = "naijapages-media-dev"
 binding = "RATE_LIMIT_KV"
 # Optional for remote staging: pin the ID from `npx wrangler kv namespace create RATE_LIMIT_KV --env development`
 # id = "<DEVELOPMENT_KV_NAMESPACE_ID>"
+
+[[env.development.queues.producers]]
+binding = "DISCOVERY_QUEUE"
+queue = "naijapages-discovery-dev"
+
+[[env.development.queues.consumers]]
+queue = "naijapages-discovery-dev"
+max_batch_size = 5
+max_batch_timeout = 5
+max_retries = 3
+retry_delay = 30
+dead_letter_queue = "naijapages-discovery-dev-dlq"
+max_concurrency = 1
+
+# 01:00 UTC = 02:00 Africa/Lagos (WAT, UTC+1).
+[env.development.triggers]
+crons = ["0 1 * * *"]

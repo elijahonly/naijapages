@@ -1,89 +1,76 @@
 # NaijaPages — Nigeria Business Directory & Marketplace
 
-A React + Firebase site with a business directory, a marketplace, member accounts, and a full **admin site** for moderation.
-
-> **What's new in v2** — shared database for listings and ads, member-only posting, an admin site, About and Contact pages,
-> daily random Featured picks, and a hardened security setup. Details are in [What changed](#what-changed-in-v2).
+A React + Vite + Cloudflare Workers application with a business directory covering all 36 Nigerian States and the FCT, a peer-to-peer marketplace, member authentication (Better Auth), R2 media uploads, QR code business cards, and a full **admin console** for moderation.
 
 ---
 
-## 1. Run it on your computer
+## 1. Run locally
 
 You need **Node.js 20.19+ or 22.12+**.
 
 ```bash
 npm install
-npm run dev          # opens on http://localhost:3000
+npm run dev
 ```
 
-Other commands: `npm run build` (production build into `dist/`), `npm run lint` (type check).
+`npm run dev` automatically applies local D1 SQLite migrations, starts the local Cloudflare Worker (`wrangler dev --env development --port 8787`), and starts Vite on `http://localhost:3000` (which proxies `/api/*` to the Worker).
 
-## 2. One-time Firebase setup (about 10 minutes)
+Useful commands:
 
-The site stores everything in the Firebase project named in `firebase-applet-config.json`.
-Do these steps **once**, in this order:
+- `npm run lint` — TypeScript type check for both frontend and `worker/`
+- `npm run cf:test` — unit and integration test suite (`tsx --test`)
+- `npm run build` — production Vite build into `dist/`
+- `npm run cf:validate` — production build + `wrangler deploy --env production --dry-run`
+- `npm run cf:db:migrate:local` — apply D1 migrations to the local development database
+- `npm run cf:db:migrate:prod` — apply D1 migrations to the production Cloudflare D1 database
+- `npm run deploy` — build and deploy to Cloudflare Workers (`--env production`)
 
-1. **Turn on sign-in methods.** Firebase console → *Authentication* → *Sign-in method* → enable **Email/Password** and **Google**.
-2. **Authorise your website address.** *Authentication* → *Settings* → *Authorized domains* → add your live domain (and keep `localhost` for testing).
-   If sign-in says *"This website address is not authorised"*, this is the fix.
-3. **Publish the security rules.** The rules in `firestore.rules` are what actually protect your data.
-   - With the Firebase CLI: `npx firebase-tools login`, then `npm run rules:deploy`.
-   - Or by hand: Firebase console → *Firestore Database* → pick the database named in `firebase-applet-config.json` (`firestoreDatabaseId`) → *Rules* → paste the contents of `firestore.rules` → *Publish*.
-   - ⚠ Until you do this, member posting, reviews, reports and the admin site will not work. The public site keeps working with the built-in directory.
-4. **Create your admin account.** Open your site at `/#/admin`, sign in (or create an account on the site first), and follow the on-screen steps. It shows your user ID and exactly what to add in the Firebase console. This one-time step is deliberate: nobody can make themselves an admin from the website.
-5. **Fill in your details.** In the admin site open *Site settings* and add your contact email, phone, WhatsApp, address, About-page story, and (optionally) an announcement.
-6. **Read [docs/SECURITY.md](docs/SECURITY.md)** and tick off the production checklist (restrict the API key, turn on App Check, set a budget alert).
+## 2. Cloudflare setup & production deployment
 
-## 3. Put it online
+NaijaPages runs on **Cloudflare Workers + Static Assets** backed by:
 
-- **Firebase Hosting** (recommended; headers and routing are already configured in `firebase.json`):
-  `npm run deploy` publishes both the rules and the site.
-- **Netlify / Cloudflare Pages / any static host:** run `npm run build` and upload `dist/`. A ready-made `dist/_headers` file carries the security headers for Netlify and Cloudflare Pages.
+- **Cloudflare D1** (`DB`) — relational SQLite database for users, sessions, businesses, marketplace ads, reviews, ownership claims, reports, favourites, contact messages, subscribers, settings, and audit logs.
+- **Cloudflare R2** (`MEDIA_BUCKET`) — object storage for member avatars, business logos/covers/galleries, and marketplace photos served via `/api/media/*`.
+- **Cloudflare KV** (`RATE_LIMIT_KV`) — distributed rate-limiting counters in production (with a bounded in-memory fallback for local development).
 
-The admin site lives at **`https://your-site/#/admin`** (also reachable via `/admin.html`). It only loads for people who open it.
+See **[docs/CLOUDFLARE_SETUP.md](docs/CLOUDFLARE_SETUP.md)** for complete provisioning, secrets (`BETTER_AUTH_SECRET`, OAuth/Resend/Turnstile keys), D1 migrations, and deployment instructions.
 
-## 4. Day-to-day: managing the site
+The admin site lives at **`https://your-site/#/admin`** (lazy-loaded only when opened).
 
-Everything is in the admin site. See **[docs/ADMIN_GUIDE.md](docs/ADMIN_GUIDE.md)** for a walkthrough.
-In short: approve new business listings, remove bad listings and ads, suspend abusive members, handle reports and ownership claims, read contact messages, and edit contact details and announcements.
+## 3. Data integrity & listing verification
 
-## What changed in v2
+NaijaPages ships **zero synthetic, placeholder, or preloaded fake businesses or marketplace ads**. Only Nigerian geographic reference data (36 States + FCT, LGAs, geopolitical zones, business/marketplace categories, and official emergency hotlines) is bundled in `src/data/`.
 
-| Area | Before | Now |
-|---|---|---|
-| Listings, ads, reviews | Saved in each visitor's own browser (nobody else could see them; nothing to moderate) | Saved in the shared Firestore database |
-| Who can add a business / post an ad | Anyone, no account | **Signed-in members with a verified email** (enforced by the database rules, not just the buttons) |
-| New listings | Instantly "verified" with a fake 5.0 rating (anyone typing any CAC text) | Start as **pending** with no rating; an admin approves them. The Verified badge is awarded only by an admin |
-| Featured businesses | Same top-rated list every day | **Random, rotating daily** at midnight Nigerian time (same picks for every visitor) |
-| Ownership claims | One click instantly verified any listing | Sent to an admin for review |
-| Reviews | Anyone, any name | Members only, one per business, under their own name |
-| Pages | — | **About us** and **Contact us** (with FAQ), editable text from the admin |
-| Admin | — | Full admin site (dashboard, moderation queues, users, reports, claims, messages, settings, audit log) |
-| Security | Open database rules, loose link checks | Locked-down rules, link/input validation, security headers + CSP, email verification, reports, suspensions |
+Every public business listing and marketplace advertisement comes from genuine member submissions stored in Cloudflare D1:
 
-Also fixed: `npm install` failed because of an `esbuild` version clash; modals now close with the Escape key; many dialogs got proper accessibility labels; the mobile header no longer overflows; dark mode added to the sign-in dialog.
+| Status | Meaning |
+|---|---|
+| **Pending** | Newly submitted by a signed-in member with a verified email. Hidden from public search until an administrator reviews and approves it. |
+| **Approved (Unverified)** | Reviewed and published by an administrator so visitors can discover and contact the business, without a Verified badge. |
+| **Approved & Verified** | Independently checked by an administrator (for example against CAC records or ownership proof) and awarded the **Verified** badge. Only approved, verified businesses are eligible for the daily Featured spotlight. |
+| **Rejected / Removed** | Not shown publicly; the owner sees the administrator's moderation note under *My Submissions*. |
 
-## About the built-in directory data
+## 4. Day-to-day moderation
 
-`src/data` ships **37,000 listings**, but **36,570 of them are generated placeholders** (names, phone numbers and CAC numbers are invented; they carry `isSample: true`) and are all marked "verified". They remain searchable, but are **kept out of the daily Featured picks** (see `src/lib/config.ts` → `FEATURED_INCLUDE_SAMPLE_LISTINGS`).
-Displaying invented businesses and phone numbers as "Verified" can mislead visitors and may reach real people's phones, so consider replacing them with real, confirmed data (you can hide any single one from *Admin → Businesses → Built-in directory*).
-The old static copy under `public/assets/aistudio/` is not used by the app; delete it if you don't need it.
+See **[docs/ADMIN_GUIDE.md](docs/ADMIN_GUIDE.md)** for full moderation workflows (approving/verifying businesses, moderating marketplace ads, handling reports and ownership claims, managing members/admins, and editing site settings).
+
+See **[docs/SECURITY.md](docs/SECURITY.md)** for the security architecture and production hardening checklist.
 
 ## Project layout
 
 ```
-firestore.rules            Database security rules  ← the real security boundary
-firebase.json / .firebaserc  Deploy settings (rules, hosting, security headers)
-config/security-headers.ts   Content-Security-Policy + headers (one source of truth)
+wrangler.toml              Cloudflare Workers environments (development & production) + bindings
+config/security-headers.ts Content-Security-Policy + HTTP security headers
+worker/
+  src/                     Hono Worker API, Better Auth, D1 routes, R2 media handler, KV rate limiter
+  migrations/              Versioned Cloudflare D1 SQL migrations
 src/
-  App.tsx, Root.tsx          Public site + router (hash routes: #/, #/marketplace, #/about, #/contact, #/admin)
-  pages/                     About and Contact pages
-  components/                Public UI (cards, modals, header, footer …)
-  context/                   Auth (roles, verification) and shared data (live Firestore + built-in data)
-  services/content.ts        All member writes, with validation
-  lib/                       config, security helpers, daily-pick engine, router
-  admin/                     The admin site (loaded only when /#/admin is opened)
-  data/                      Built-in directory and marketplace data
+  App.tsx, Root.tsx        Public site + hash router (#/, #/marketplace, #/about, #/contact, #/admin)
+  pages/                   About and Contact pages
+  components/              Public UI (cards, modals, QR generator, search, header, footer)
+  context/                 Auth (Better Auth session & roles) and DataContext (Cloudflare D1 bootstrap)
+  services/                Directory filtering/sorting and API write helpers
+  lib/                     config, security validation, QR code utilities, daily-pick engine, router
+  admin/                   Admin console (loaded only when /#/admin is opened)
+  data/                    Nigerian States/LGAs, categories, safety tips, emergency numbers (no fake listings)
 ```
-
-Knobs you may want (all in `src/lib/config.ts`): number of Featured businesses/ads per day, whether placeholders may be featured, and whether a verified email is required to post (change `firestore.rules` too if you switch that off).

@@ -1,6 +1,5 @@
 import React, { useMemo, useState } from 'react';
 import { Star, Trash2, UserX } from 'lucide-react';
-import { INITIAL_BUSINESSES } from '../../data/nigeriaData';
 import { ReviewRow, banUser, deleteReview, fetchAdminReviews, useAdminQuery } from '../api';
 import { useAdmin } from '../AdminContext';
 import { useRunner } from '../useRunner';
@@ -13,20 +12,17 @@ export default function Reviews() {
   const [term, setTerm] = useState('');
   const { data, loading, error } = useAdminQuery(() => fetchAdminReviews(), [], []);
 
-  // Business names for readability. Built lazily, once, when this page opens.
-  const names = useMemo(() => new Map(INITIAL_BUSINESSES.map((b) => [b.id, b.name])), []);
-
   const q = term.trim().toLowerCase();
   const rows = useMemo(
     () =>
       data.filter(
         (r) =>
           !q ||
-          [r.authorName, r.comment, r.businessId, r.businessName ?? names.get(r.businessId) ?? ''].some((v) =>
+          [r.authorName, r.comment, r.businessId, r.businessName ?? ''].some((v) =>
             v.toLowerCase().includes(q),
           ),
       ),
-    [data, q, names],
+    [data, q],
   );
 
   const remove = async (r: ReviewRow) => {
@@ -65,7 +61,7 @@ export default function Reviews() {
                     {r.authorName} <span className="text-amber-500">{'★'.repeat(r.rating)}<span className="text-slate-300 dark:text-slate-700">{'★'.repeat(5 - r.rating)}</span></span>
                   </p>
                   <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                    on <b>{r.businessName ?? names.get(r.businessId) ?? r.businessId}</b> · {formatDate(r.createdAt)}
+                    on <b>{r.businessName ?? r.businessId}</b> · {formatDate(r.createdAt)}
                   </p>
                   <p className="mt-1.5 text-[13px] text-slate-700 dark:text-slate-200 whitespace-pre-line break-words">{r.comment}</p>
                 </div>

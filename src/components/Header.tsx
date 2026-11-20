@@ -124,11 +124,13 @@ export const Header: React.FC<HeaderProps> = ({
       <div className="bg-emerald-800 text-white text-xs px-4 py-1.5 flex items-center justify-between overflow-x-auto whitespace-nowrap">
         <div className="flex items-center gap-2 mx-auto">
           <span className="inline-block w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-          <span>Verified Nigerian Business Directory across all 36 States & FCT</span>
+          <span>Nigerian Business Directory across all 36 States &amp; FCT</span>
           <span className="hidden md:inline text-emerald-200">•</span>
-          <span className="hidden md:inline text-emerald-200">Direct WhatsApp & Call connectivity</span>
+          <span className="hidden md:inline text-emerald-200">Direct WhatsApp &amp; Call connectivity</span>
           <span className="hidden md:inline text-emerald-200">•</span>
-          <span className="hidden md:inline font-semibold">{totalListings} Active Businesses Listed</span>
+          <span className="hidden md:inline font-semibold">
+            {totalListings.toLocaleString()} Active {totalListings === 1 ? 'Business' : 'Businesses'} Listed
+          </span>
         </div>
         <div className="flex items-center gap-3 shrink-0 ml-2">
           <nav aria-label="Company" className="hidden sm:flex items-center gap-3 text-emerald-100">

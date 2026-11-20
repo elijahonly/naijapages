@@ -47,7 +47,6 @@ export default defineConfig(() => {
             groups: [
               {name: 'firebase', test: /node_modules[\\/](@firebase|firebase)[\\/]/, priority: 20},
               {name: 'react', test: /node_modules[\\/](react|react-dom|scheduler)[\\/]/, priority: 15},
-              {name: 'seed-data', test: /src[\\/]data[\\/]/, priority: 10},
             ],
           },
         },

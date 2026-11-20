@@ -22,7 +22,7 @@ import {
 import { Business } from '../types';
 import { formatWhatsAppUrl, formatTelUrl } from '../data/nigeriaData';
 import { pickDaily, useDayKey } from '../lib/daily';
-import { FEATURED_BUSINESS_COUNT, FEATURED_INCLUDE_SAMPLE_LISTINGS } from '../lib/config';
+import { FEATURED_BUSINESS_COUNT } from '../lib/config';
 import { ratingSummary } from '../lib/format';
 
 interface FeaturedBusinessesCarouselProps {
@@ -55,10 +55,9 @@ export const FeaturedBusinessesCarousel: React.FC<FeaturedBusinessesCarouselProp
   // Every visitor sees the same picks on a given day (Nigerian time); they change at midnight.
   const today = useDayKey();
 
-  // Eligible: verified listings (approved community listings only reach this list once an admin approved them).
-  // Generated placeholder listings are excluded unless FEATURED_INCLUDE_SAMPLE_LISTINGS is switched on.
+  // Eligible: verified listings approved and verified by an administrator.
   const pool = React.useMemo(
-    () => businesses.filter((b) => b.isVerified && (FEATURED_INCLUDE_SAMPLE_LISTINGS || !b.isSample)),
+    () => businesses.filter((b) => b.isVerified),
     [businesses],
   );
 
