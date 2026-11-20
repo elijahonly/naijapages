@@ -92,6 +92,15 @@ export const BusinessCard: React.FC<BusinessCardProps> = ({
                 </span>
               )}
 
+              {business.originType === 'bot_discovered' && !business.isVerified && (
+                <span
+                  className="text-[10px] font-medium text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded border border-slate-200 dark:border-slate-700"
+                  title="Discovered from public sources; not yet owner-verified"
+                >
+                  Unverified · Public source
+                </span>
+              )}
+
               {business.cacNumber && business.isVerified && (
                 <span className="text-[10px] font-mono font-bold text-amber-800 dark:text-amber-300 bg-amber-100/70 dark:bg-amber-950/80 px-1.5 py-0.5 rounded border border-amber-300 dark:border-amber-800">
                   {business.cacNumber}
@@ -148,6 +157,25 @@ export const BusinessCard: React.FC<BusinessCardProps> = ({
       {business.description && (
         <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 line-clamp-2 leading-relaxed">
           {business.description}
+        </p>
+      )}
+
+      {business.sourceAttribution && (
+        <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1.5">
+          Source:{' '}
+          {business.sourceLicenceUrl ? (
+            <a
+              href={business.sourceLicenceUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              className="underline hover:text-emerald-600 dark:hover:text-emerald-400"
+            >
+              {business.sourceAttribution}
+            </a>
+          ) : (
+            <span>{business.sourceAttribution}</span>
+          )}
         </p>
       )}
 

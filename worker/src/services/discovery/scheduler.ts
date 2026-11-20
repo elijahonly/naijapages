@@ -1,4 +1,5 @@
 import type { Bindings, DiscoveryScheduledController } from '../../types';
+import { getDiscoveryBotSettings, isSourceCircuitOpen } from './botSettingsService';
 import { parseDiscoveryConfig } from './config';
 import { sanitizeDiscoveryErrorMessage } from './errors';
 import {
@@ -78,7 +79,10 @@ export async function handleDiscoveryScheduled(
     errors: [],
   };
 
-  if (!config.enabled) {
+  const botSettings = await getDiscoveryBotSettings(env.DB);
+  const effectiveMaxJobsPerRun = Math.min(config.maxJobsPerRun, botSettings.dailyJobLimit);
+
+  if (!config.enabled || botSettings.globalPaused || botSettings.discoveryPaused) {
     logScheduler('run.skipped', { reason: 'discovery_disabled', cron: controller.cron, utcDateKey });
     return { ...baseSummary, reason: 'discovery_disabled' };
   }
@@ -121,7 +125,7 @@ export async function handleDiscoveryScheduled(
   const remainingBacklogCapacity = Math.max(0, config.maxQueuedBacklog - activeBacklogBefore);
   const remainingRunBudget = Math.max(
     0,
-    Math.min(config.maxJobsPerRun - enqueuedJobIds.length, remainingBacklogCapacity),
+    Math.min(effectiveMaxJobsPerRun - enqueuedJobIds.length, remainingBacklogCapacity),
   );
 
   if (remainingBacklogCapacity === 0) {
@@ -173,7 +177,16 @@ export async function handleDiscoveryScheduled(
   const skippedExistingJobIds: string[] = [];
 
   for (const source of sources) {
-    if (enqueuedJobIds.length >= config.maxJobsPerRun) break;
+    if (enqueuedJobIds.length >= effectiveMaxJobsPerRun) break;
+
+    const circuit = await isSourceCircuitOpen(env.DB, source.id, now);
+    if (circuit.open) {
+      logScheduler('source.circuit_open', {
+        sourceId: source.id,
+        openUntil: circuit.openUntil,
+      });
+      continue;
+    }
 
     const idempotencyKey = `scheduled:${source.id}:state_sweep:${utcDateKey}`;
     try {

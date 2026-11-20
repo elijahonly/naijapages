@@ -1,8 +1,20 @@
 import { OSM_ATTRIBUTION, OSM_SOURCE_ID, osmSourceAdapter } from './osmSource';
+import {
+  REGISTRY_FEED_ATTRIBUTION,
+  REGISTRY_FEED_SOURCE_ID,
+  registryFeedSourceAdapter,
+} from './registryFeedSource';
+import {
+  WEBSITE_ATTRIBUTION,
+  WEBSITE_SOURCE_ID,
+  websiteStructuredSourceAdapter,
+} from './websiteSource';
 import type { DiscoverySourceAdapter } from './types';
 
 const adapterRegistry = new Map<string, DiscoverySourceAdapter>([
   [OSM_SOURCE_ID, osmSourceAdapter],
+  [WEBSITE_SOURCE_ID, websiteStructuredSourceAdapter],
+  [REGISTRY_FEED_SOURCE_ID, registryFeedSourceAdapter],
 ]);
 
 export function getDiscoverySourceAdapter(sourceId: string): DiscoverySourceAdapter | null {
@@ -66,4 +78,59 @@ export async function ensureOsmDiscoverySourceRecord(
       now,
     )
     .run();
+}
+
+/**
+ * Registers all built-in legal source connectors in `discovery_sources` with
+ * `permission_status = 'pending_review'` and `enabled = 0` by default.
+ */
+export async function ensureDefaultDiscoverySources(
+  db: D1Database,
+  now: number = Date.now(),
+): Promise<void> {
+  await ensureOsmDiscoverySourceRecord(db, { now });
+
+  const additionalSources = [
+    {
+      attr: WEBSITE_ATTRIBUTION,
+      baseUrl: 'https://schema.org/LocalBusiness',
+      description:
+        'Public official business website structured metadata (schema.org JSON-LD) connector with SSRF guardrails.',
+      rateLimit: 20,
+    },
+    {
+      attr: REGISTRY_FEED_ATTRIBUTION,
+      baseUrl: 'https://naijapages.ng/data-sources',
+      description:
+        'Authorised Nigerian public business registry, state portal, or chamber of commerce structured JSON feed connector.',
+      rateLimit: 15,
+    },
+  ];
+
+  for (const src of additionalSources) {
+    await db
+      .prepare(
+        `INSERT OR IGNORE INTO discovery_sources (
+          id, name, source_type, base_url, description,
+          licence_name, licence_url, attribution_text, permitted_usage,
+          permission_status, enabled, rate_limit_per_minute,
+          created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending_review', 0, ?, ?, ?)`,
+      )
+      .bind(
+        src.attr.sourceId,
+        src.attr.sourceName,
+        src.attr.sourceType,
+        src.baseUrl,
+        src.description,
+        src.attr.licenceName,
+        src.attr.licenceUrl,
+        src.attr.attributionText,
+        src.attr.permittedUsage,
+        src.rateLimit,
+        now,
+        now,
+      )
+      .run();
+  }
 }

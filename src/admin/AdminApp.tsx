@@ -10,6 +10,7 @@ import {
   Mail,
   Menu,
   Moon,
+  Radar,
   Settings as SettingsIcon,
   ShieldAlert,
   ShieldCheck,
@@ -40,9 +41,11 @@ import Reviews from './pages/Reviews';
 import Messages from './pages/Messages';
 import SettingsPage from './pages/Settings';
 import Activity from './pages/Activity';
+import DiscoveryIntelligence from './pages/DiscoveryIntelligence';
 
 const NAV = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { id: 'intelligence', label: 'Business Intelligence', icon: Radar },
   { id: 'businesses', label: 'Businesses', icon: Building2, badge: 'pendingBusinesses' },
   { id: 'marketplace', label: 'Marketplace', icon: ShoppingBag, badge: 'pendingAds' },
   { id: 'reports', label: 'Reports', icon: Flag, badge: 'openReports' },
@@ -113,6 +116,8 @@ const Shell: React.FC<{ section: string; admin: AdminCtx; displayName: string }>
 
   const page = (() => {
     switch (activeId) {
+      case 'intelligence':
+        return <DiscoveryIntelligence />;
       case 'businesses':
         return <Businesses />;
       case 'marketplace':

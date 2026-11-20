@@ -513,3 +513,325 @@ export async function saveSettings(_admin: AdminCtx, s: SiteSettings) {
   });
   notifyAll();
 }
+
+// ---------------------------------------------------------------------------
+// Business Intelligence: Automated Discovery, Verification & Monitoring Bot
+// ---------------------------------------------------------------------------
+
+export interface DiscoverySourceRow {
+  id: string;
+  name: string;
+  sourceType: string;
+  baseUrl: string;
+  licenceName: string;
+  licenceUrl: string | null;
+  attributionText: string | null;
+  permissionStatus: 'pending_review' | 'approved' | 'restricted' | 'rejected' | 'revoked';
+  enabled: boolean;
+  rateLimitPerMinute: number;
+  integrationType: string;
+  healthStatus: string;
+  reliabilityScore: number;
+  consecutiveFailures: number;
+  circuitOpenUntil: number | null;
+  lastSuccessfulSync: number | null;
+  lastFailedSync: number | null;
+  lastError: string | null;
+}
+
+export interface StateCoverageRow {
+  state: string;
+  capital: string;
+  zone: string;
+  totalLgasTracked: number;
+  lgasWithListings: number;
+  memberListings: number;
+  discoveredCandidates: number;
+  publishedBotListings: number;
+  totalAuthenticListings: number;
+  coverageGapScore: number;
+}
+
+export interface CategoryCoverageRow {
+  category: string;
+  memberListings: number;
+  discoveredCandidates: number;
+  publishedBotListings: number;
+  totalAuthenticListings: number;
+}
+
+export interface DiscoveryBotSettingsRow {
+  globalPaused: boolean;
+  discoveryPaused: boolean;
+  monitoringPaused: boolean;
+  dailyJobLimit: number;
+  maxBatchSize: number;
+  autoPublishMinConfidence: number;
+  autoPublishMinSources: number;
+  reviewMinConfidence: number;
+  closureConfirmThreshold: number;
+  monitoringDefaultDays: number;
+  aiExtractionEnabled: boolean;
+  aiDailyBudgetCalls: number;
+  updatedBy: string | null;
+  updatedAt: number;
+}
+
+export interface DiscoveryOverviewPayload {
+  metrics: {
+    totalAuthenticListings: number;
+    memberListings: number;
+    newlyDiscovered: number;
+    businessesPublished: number;
+    awaitingVerification: number;
+    awaitingReview: number;
+    duplicateCandidates: number;
+    potentiallyOutdated: number;
+    confirmedClosures: number;
+    discoveryJobsRunning: number;
+    failedJobs: number;
+    completedJobs: number;
+  };
+  sources: DiscoverySourceRow[];
+  coverage: {
+    totalStates: number;
+    statesCovered: number;
+    totalLgasTracked: number;
+    lgasCovered: number;
+    byState: StateCoverageRow[];
+    byCategory: CategoryCoverageRow[];
+  };
+  settings: DiscoveryBotSettingsRow;
+}
+
+export interface DiscoveryReviewQueueRow {
+  id: string;
+  discoveredBusinessId: string | null;
+  businessId: string | null;
+  reviewReason: string;
+  confidenceScore: number;
+  suggestedAction: string;
+  reviewStatus: string;
+  adminDecision: string | null;
+  adminNote: string | null;
+  createdAt: number;
+  candidate: {
+    id: string;
+    name: string;
+    category: string | null;
+    state: string | null;
+    lga: string | null;
+    address: string | null;
+    phone: string | null;
+    website: string | null;
+    email: string | null;
+    openingHours: string | null;
+    sourceId: string | null;
+    sourceUrl: string | null;
+    verificationTier: string;
+    lifecycleStatus: string;
+    corroboratingSourceCount: number;
+    attributionText: string | null;
+  } | null;
+  duplicateCandidates: Array<{
+    candidateId?: string;
+    targetName?: string;
+    score?: number;
+    classification?: string;
+    reasons?: string[];
+  }>;
+  evidence: Array<{
+    id: string;
+    source_id: string;
+    evidence_type: string;
+    field_name: string | null;
+    evidence_value: string | null;
+    source_url: string | null;
+    confidence: number;
+    attribution_text: string | null;
+    licence_reference: string | null;
+    notes: string | null;
+    collected_at: number;
+  }>;
+}
+
+export interface DiscoveryJobRow {
+  id: string;
+  sourceId: string;
+  jobType: string;
+  state: string | null;
+  lga: string | null;
+  category: string | null;
+  status: string;
+  priority: number;
+  attempts: number;
+  discoveredCount: number;
+  processedCount: number;
+  acceptedCount: number;
+  rejectedCount: number;
+  duplicateCount: number;
+  errorCount: number;
+  errorMessage: string | null;
+  createdAt: number;
+  startedAt: number | null;
+  completedAt: number | null;
+}
+
+export interface DiscoveryMonitoringRow {
+  id: string;
+  discoveredBusinessId: string | null;
+  businessId: string | null;
+  businessName: string;
+  state: string;
+  lga: string;
+  healthStatus: string;
+  monitoringTier: string;
+  checkIntervalDays: number;
+  verificationAttempts: number;
+  failedChecks: number;
+  consecutiveFailures: number;
+  closureSignalCount: number;
+  lastKnownStatus: string;
+  monitoringNotes: string | null;
+  lastVerifiedAt: number | null;
+  nextCheckAt: number;
+}
+
+export interface DiscoveryChangeHistoryRow {
+  id: string;
+  discoveredBusinessId: string | null;
+  businessId: string | null;
+  fieldChanged: string;
+  oldValue: string | null;
+  newValue: string | null;
+  changeSource: string;
+  actorEmail: string | null;
+  reason: string | null;
+  appliedMode: string;
+  createdAt: number;
+}
+
+export const fetchDiscoveryOverview = () =>
+  apiFetch<DiscoveryOverviewPayload>('/api/v1/admin/discovery/overview');
+
+export const fetchDiscoveryReviewQueue = async (
+  status = 'pending',
+  limit = 60,
+): Promise<DiscoveryReviewQueueRow[]> =>
+  (
+    await apiFetch<{ items: DiscoveryReviewQueueRow[] }>(
+      `/api/v1/admin/discovery/review-queue?status=${encodeURIComponent(status)}&limit=${limit}`,
+    )
+  ).items;
+
+export const decideDiscoveryReviewItem = async (
+  reviewId: string,
+  payload: {
+    action:
+      | 'approve_publish'
+      | 'reject'
+      | 'merge_duplicate'
+      | 'keep_separate_branch'
+      | 'edit_candidate'
+      | 'request_verification'
+      | 'confirm_relocation'
+      | 'confirm_closure'
+      | 'restore_archived';
+    note?: string;
+    edits?: Record<string, string>;
+  },
+) => {
+  await apiFetch(`/api/v1/admin/discovery/review-queue/${encodeURIComponent(reviewId)}/decision`, {
+    method: 'POST',
+    body: payload,
+  });
+  notifyAll();
+};
+
+export const updateDiscoverySource = async (
+  sourceId: string,
+  patch: {
+    permissionStatus?: 'pending_review' | 'approved' | 'restricted' | 'rejected' | 'revoked';
+    enabled?: boolean;
+    rateLimitPerMinute?: number;
+    resetCircuitBreaker?: boolean;
+  },
+) => {
+  await apiFetch(`/api/v1/admin/discovery/sources/${encodeURIComponent(sourceId)}`, {
+    method: 'PATCH',
+    body: patch,
+  });
+  notifyAll();
+};
+
+export const fetchDiscoveryJobs = async (limit = 60): Promise<DiscoveryJobRow[]> =>
+  (await apiFetch<{ items: DiscoveryJobRow[] }>(`/api/v1/admin/discovery/jobs?limit=${limit}`))
+    .items;
+
+export const runManualDiscoveryJob = async (payload: {
+  sourceId: string;
+  state: string;
+  lga?: string;
+  category?: string;
+  maxResults?: number;
+  endpointUrl?: string;
+}) => {
+  const res = await apiFetch<{ job: { id: string }; enqueued: boolean }>(
+    '/api/v1/admin/discovery/jobs/run',
+    {
+      method: 'POST',
+      body: payload,
+    },
+  );
+  notifyAll();
+  return res;
+};
+
+export const retryDiscoveryJobAdmin = async (jobId: string) => {
+  await apiFetch(`/api/v1/admin/discovery/jobs/${encodeURIComponent(jobId)}/retry`, {
+    method: 'POST',
+    body: {},
+  });
+  notifyAll();
+};
+
+export const fetchDiscoveryMonitoring = async (limit = 60): Promise<DiscoveryMonitoringRow[]> =>
+  (
+    await apiFetch<{ items: DiscoveryMonitoringRow[] }>(
+      `/api/v1/admin/discovery/monitoring?limit=${limit}`,
+    )
+  ).items;
+
+export const actOnMonitoringRecord = async (
+  monitoringId: string,
+  action: 'confirm_closure' | 'confirm_relocation' | 'restore_archived' | 'mark_healthy',
+  note?: string,
+) => {
+  await apiFetch(`/api/v1/admin/discovery/monitoring/${encodeURIComponent(monitoringId)}/action`, {
+    method: 'POST',
+    body: { action, note },
+  });
+  notifyAll();
+};
+
+export const fetchDiscoveryHistory = async (limit = 80): Promise<DiscoveryChangeHistoryRow[]> =>
+  (
+    await apiFetch<{ items: DiscoveryChangeHistoryRow[] }>(
+      `/api/v1/admin/discovery/history?limit=${limit}`,
+    )
+  ).items;
+
+export const saveDiscoveryBotSettings = async (
+  patch: Partial<Omit<DiscoveryBotSettingsRow, 'updatedBy' | 'updatedAt'>>,
+) => {
+  const res = await apiFetch<{ settings: DiscoveryBotSettingsRow }>(
+    '/api/v1/admin/discovery/settings',
+    {
+      method: 'PUT',
+      body: patch,
+    },
+  );
+  notifyAll();
+  return res.settings;
+};
+

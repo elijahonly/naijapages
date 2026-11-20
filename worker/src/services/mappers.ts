@@ -69,6 +69,35 @@ export interface BusinessDbRow {
   moderation_note: string | null;
   reviewed_by: string | null;
   reviewed_at: number | null;
+  origin_type?: string | null;
+  verification_tier?: string | null;
+  source_attribution?: string | null;
+  source_licence_url?: string | null;
+  discovered_business_id?: string | null;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface PublishedDiscoveredBusinessDbRow {
+  id: string;
+  name: string;
+  category: string | null;
+  state: string | null;
+  lga: string | null;
+  address: string | null;
+  phone: string | null;
+  website: string | null;
+  email: string | null;
+  opening_hours: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  source_id: string;
+  source_url: string | null;
+  verification_tier: string | null;
+  lifecycle_status: string | null;
+  review_status: string;
+  attribution_text: string | null;
+  source_licence_url: string | null;
   created_at: number;
   updated_at: number;
 }
@@ -250,6 +279,81 @@ export function mapBusinessRow(r: BusinessDbRow) {
     ownerName: cleanText(r.owner_name, LIMITS.displayName) || undefined,
     status: r.status as 'pending' | 'approved' | 'rejected' | 'removed',
     moderationNote: r.moderation_note ? cleanText(r.moderation_note, 500) || undefined : undefined,
+    originType: (r.origin_type as 'member_submitted' | 'bot_discovered' | 'owner_claimed') || 'member_submitted',
+    verificationTier:
+      (r.verification_tier as
+        | 'discovered'
+        | 'evidence_checked'
+        | 'listing_verified'
+        | 'owner_verified'
+        | 'registry_corroborated') || (r.is_verified === 1 ? 'owner_verified' : undefined),
+    sourceAttribution: r.source_attribution ? cleanText(r.source_attribution, 200) || undefined : undefined,
+    sourceLicenceUrl: r.source_licence_url ? safeHttpUrl(r.source_licence_url, { max: 300 }) : undefined,
+    createdAt: Number(r.created_at) || undefined,
+  };
+}
+
+/**
+ * Maps an approved & published `discovered_businesses` staging row into the public `Business`
+ * shape without fabricating phone numbers, ratings, reviews, or Owner Verified badges.
+ */
+export function mapPublishedDiscoveredBusinessRow(r: PublishedDiscoveredBusinessDbRow) {
+  const tier =
+    (r.verification_tier as
+      | 'discovered'
+      | 'evidence_checked'
+      | 'listing_verified'
+      | 'owner_verified'
+      | 'registry_corroborated') || 'discovered';
+  const mapUrl =
+    typeof r.latitude === 'number' &&
+    typeof r.longitude === 'number' &&
+    Number.isFinite(r.latitude) &&
+    Number.isFinite(r.longitude)
+      ? `https://www.google.com/maps/search/?api=1&query=${r.latitude},${r.longitude}`
+      : undefined;
+
+  return {
+    id: r.id,
+    name: cleanText(r.name, LIMITS.name),
+    category: cleanText(r.category || 'Other', LIMITS.category) || 'Other',
+    categoryId: undefined,
+    state: cleanText(r.state || 'Nigeria', LIMITS.state) || 'Nigeria',
+    lga: cleanText(r.lga || '', LIMITS.lga),
+    address: cleanText(r.address || '', LIMITS.address),
+    landmark: undefined,
+    phone: r.phone ? cleanText(r.phone, LIMITS.phone) : '',
+    secondaryPhone: undefined,
+    whatsapp: undefined,
+    email: r.email ? cleanEmail(r.email) : undefined,
+    website: r.website ? safeHttpUrl(r.website, { max: LIMITS.url }) : undefined,
+    googleMapUrl: mapUrl ? safeGoogleMapsUrl(mapUrl) : undefined,
+    logoUrl: undefined,
+    coverImageUrl: undefined,
+    gallery: undefined,
+    cacStatus: undefined,
+    cacNumber: undefined,
+    yearEstablished: undefined,
+    priceLevel: undefined,
+    paymentMethods: undefined,
+    tags: undefined,
+    openingHours: r.opening_hours ? cleanText(r.opening_hours, LIMITS.hours) || undefined : undefined,
+    description: undefined,
+    socials: undefined,
+    rating: 0,
+    reviewsCount: 0,
+    // Strictly never award Owner Verified badge automatically to bot-discovered records.
+    isVerified: tier === 'owner_verified',
+    isUserAdded: false,
+    claimed: false,
+    ownerId: undefined,
+    ownerName: undefined,
+    status: 'approved' as const,
+    moderationNote: undefined,
+    originType: 'bot_discovered' as const,
+    verificationTier: tier,
+    sourceAttribution: r.attribution_text ? cleanText(r.attribution_text, 200) || undefined : undefined,
+    sourceLicenceUrl: r.source_licence_url ? safeHttpUrl(r.source_licence_url, { max: 300 }) : undefined,
     createdAt: Number(r.created_at) || undefined,
   };
 }

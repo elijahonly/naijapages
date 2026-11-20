@@ -41,6 +41,21 @@ import {
   setSeedHidden,
   unbanUser,
 } from '../services/adminService';
+import {
+  actOnAdminMonitoringRecord,
+  decideAdminReviewQueueItem,
+  getAdminDiscoveryOverview,
+  getDiscoveryBotSettings,
+  listAdminBotHistory,
+  listAdminDiscoveryJobs,
+  listAdminMonitoringRecords,
+  listAdminReviewQueue,
+  retryAdminDiscoveryJob,
+  runManualAdminDiscoveryJob,
+  saveAdminDiscoverySettings,
+  updateAdminDiscoverySource,
+  type AdminReviewAction,
+} from '../services/discovery';
 import type { AppEnv } from '../types';
 
 export const adminRoutes = new Hono<AppEnv>();
@@ -466,3 +481,227 @@ adminRoutes.get('/audit', async (c) => {
     return handleRouteError(c, err);
   }
 });
+
+// ---------------------------------------------------------------------------
+// Business Intelligence: Automated Discovery, Verification & Monitoring Bot
+// ---------------------------------------------------------------------------
+
+adminRoutes.get('/discovery/overview', async (c) => {
+  try {
+    return jsonOk(c, await getAdminDiscoveryOverview(c.env.DB));
+  } catch (err) {
+    return handleRouteError(c, err);
+  }
+});
+
+adminRoutes.get('/discovery/review-queue', async (c) => {
+  try {
+    const status = c.req.query('status') || 'pending';
+    const limit = parseNumberParam(c.req.query('limit'));
+    const items = await listAdminReviewQueue(c.env.DB, { status, limit });
+    return jsonOk(c, { items });
+  } catch (err) {
+    return handleRouteError(c, err);
+  }
+});
+
+const ALLOWED_REVIEW_ACTIONS = new Set<AdminReviewAction>([
+  'approve_publish',
+  'reject',
+  'merge_duplicate',
+  'keep_separate_branch',
+  'edit_candidate',
+  'request_verification',
+  'confirm_relocation',
+  'confirm_closure',
+  'restore_archived',
+]);
+
+adminRoutes.post('/discovery/review-queue/:id/decision', async (c) => {
+  try {
+    const body = await readJsonBody(c);
+    const rawAction = String(body.action ?? '') as AdminReviewAction;
+    if (!ALLOWED_REVIEW_ACTIONS.has(rawAction)) {
+      return c.json(
+        { ok: false, error: { code: 'VALIDATION_ERROR', message: 'Invalid review action.' } },
+        400,
+      );
+    }
+    const edits =
+      body.edits && typeof body.edits === 'object' && !Array.isArray(body.edits)
+        ? (body.edits as Record<string, string>)
+        : undefined;
+    const res = await decideAdminReviewQueueItem(c.env.DB, c.get('authUser')!, c.req.param('id'), {
+      action: rawAction,
+      note: typeof body.note === 'string' ? body.note : undefined,
+      edits,
+    });
+    return jsonOk(c, res);
+  } catch (err) {
+    return handleRouteError(c, err);
+  }
+});
+
+adminRoutes.patch('/discovery/sources/:id', async (c) => {
+  try {
+    const body = await readJsonBody(c);
+    const allowedPerms = ['pending_review', 'approved', 'restricted', 'rejected', 'revoked'];
+    const permissionStatus =
+      typeof body.permissionStatus === 'string' && allowedPerms.includes(body.permissionStatus)
+        ? (body.permissionStatus as
+            | 'pending_review'
+            | 'approved'
+            | 'restricted'
+            | 'rejected'
+            | 'revoked')
+        : undefined;
+    const res = await updateAdminDiscoverySource(c.env.DB, c.get('authUser')!, c.req.param('id'), {
+      permissionStatus,
+      enabled: typeof body.enabled === 'boolean' ? body.enabled : undefined,
+      rateLimitPerMinute:
+        body.rateLimitPerMinute !== undefined ? Number(body.rateLimitPerMinute) : undefined,
+      resetCircuitBreaker: Boolean(body.resetCircuitBreaker),
+    });
+    return jsonOk(c, res);
+  } catch (err) {
+    return handleRouteError(c, err);
+  }
+});
+
+adminRoutes.get('/discovery/jobs', async (c) => {
+  try {
+    const items = await listAdminDiscoveryJobs(c.env.DB, parseNumberParam(c.req.query('limit')));
+    return jsonOk(c, { items });
+  } catch (err) {
+    return handleRouteError(c, err);
+  }
+});
+
+adminRoutes.post('/discovery/jobs/run', async (c) => {
+  try {
+    const body = await readJsonBody(c);
+    const res = await runManualAdminDiscoveryJob(
+      c.env.DB,
+      c.env.DISCOVERY_QUEUE,
+      c.get('authUser')!,
+      {
+        sourceId: String(body.sourceId ?? ''),
+        state: String(body.state ?? ''),
+        lga: typeof body.lga === 'string' ? body.lga : undefined,
+        category: typeof body.category === 'string' ? body.category : undefined,
+        maxResults: body.maxResults !== undefined ? Number(body.maxResults) : undefined,
+        endpointUrl: typeof body.endpointUrl === 'string' ? body.endpointUrl : undefined,
+      },
+    );
+    return jsonOk(c, res, 201);
+  } catch (err) {
+    return handleRouteError(c, err);
+  }
+});
+
+adminRoutes.post('/discovery/jobs/:id/retry', async (c) => {
+  try {
+    const res = await retryAdminDiscoveryJob(
+      c.env.DB,
+      c.env.DISCOVERY_QUEUE,
+      c.get('authUser')!,
+      c.req.param('id'),
+    );
+    return jsonOk(c, res);
+  } catch (err) {
+    return handleRouteError(c, err);
+  }
+});
+
+adminRoutes.get('/discovery/monitoring', async (c) => {
+  try {
+    const items = await listAdminMonitoringRecords(
+      c.env.DB,
+      parseNumberParam(c.req.query('limit')),
+    );
+    return jsonOk(c, { items });
+  } catch (err) {
+    return handleRouteError(c, err);
+  }
+});
+
+adminRoutes.post('/discovery/monitoring/:id/action', async (c) => {
+  try {
+    const body = await readJsonBody(c);
+    const action = String(body.action ?? '');
+    if (
+      action !== 'confirm_closure' &&
+      action !== 'confirm_relocation' &&
+      action !== 'restore_archived' &&
+      action !== 'mark_healthy'
+    ) {
+      return c.json(
+        { ok: false, error: { code: 'VALIDATION_ERROR', message: 'Invalid monitoring action.' } },
+        400,
+      );
+    }
+    const res = await actOnAdminMonitoringRecord(
+      c.env.DB,
+      c.get('authUser')!,
+      c.req.param('id'),
+      action,
+      typeof body.note === 'string' ? body.note : undefined,
+    );
+    return jsonOk(c, res);
+  } catch (err) {
+    return handleRouteError(c, err);
+  }
+});
+
+adminRoutes.get('/discovery/settings', async (c) => {
+  try {
+    return jsonOk(c, { settings: await getDiscoveryBotSettings(c.env.DB) });
+  } catch (err) {
+    return handleRouteError(c, err);
+  }
+});
+
+adminRoutes.put('/discovery/settings', async (c) => {
+  try {
+    const body = await readJsonBody(c);
+    const settings = await saveAdminDiscoverySettings(c.env.DB, c.get('authUser')!, {
+      globalPaused: typeof body.globalPaused === 'boolean' ? body.globalPaused : undefined,
+      discoveryPaused: typeof body.discoveryPaused === 'boolean' ? body.discoveryPaused : undefined,
+      monitoringPaused:
+        typeof body.monitoringPaused === 'boolean' ? body.monitoringPaused : undefined,
+      dailyJobLimit: body.dailyJobLimit !== undefined ? Number(body.dailyJobLimit) : undefined,
+      maxBatchSize: body.maxBatchSize !== undefined ? Number(body.maxBatchSize) : undefined,
+      autoPublishMinConfidence:
+        body.autoPublishMinConfidence !== undefined
+          ? Number(body.autoPublishMinConfidence)
+          : undefined,
+      autoPublishMinSources:
+        body.autoPublishMinSources !== undefined ? Number(body.autoPublishMinSources) : undefined,
+      reviewMinConfidence:
+        body.reviewMinConfidence !== undefined ? Number(body.reviewMinConfidence) : undefined,
+      closureConfirmThreshold:
+        body.closureConfirmThreshold !== undefined
+          ? Number(body.closureConfirmThreshold)
+          : undefined,
+      monitoringDefaultDays:
+        body.monitoringDefaultDays !== undefined ? Number(body.monitoringDefaultDays) : undefined,
+      aiExtractionEnabled:
+        typeof body.aiExtractionEnabled === 'boolean' ? body.aiExtractionEnabled : undefined,
+      aiDailyBudgetCalls:
+        body.aiDailyBudgetCalls !== undefined ? Number(body.aiDailyBudgetCalls) : undefined,
+    });
+    return jsonOk(c, { settings });
+  } catch (err) {
+    return handleRouteError(c, err);
+  }
+});
+
+adminRoutes.get('/discovery/history', async (c) => {
+  try {
+    const items = await listAdminBotHistory(c.env.DB, parseNumberParam(c.req.query('limit')));
+    return jsonOk(c, { items });
+  } catch (err) {
+    return handleRouteError(c, err);
+  }
+});
+

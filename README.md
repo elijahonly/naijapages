@@ -29,41 +29,44 @@ Useful commands:
 
 NaijaPages runs on **Cloudflare Workers + Static Assets** backed by:
 
-- **Cloudflare D1** (`DB`) — relational SQLite database for users, sessions, businesses, marketplace ads, reviews, ownership claims, reports, favourites, contact messages, subscribers, settings, and audit logs.
+- **Cloudflare D1** (`DB`) — relational SQLite database for users, sessions, businesses, marketplace ads, reviews, ownership claims, reports, favourites, contact messages, subscribers, settings, audit logs, and the business discovery/evidence/monitoring tables.
 - **Cloudflare R2** (`MEDIA_BUCKET`) — object storage for member avatars, business logos/covers/galleries, and marketplace photos served via `/api/media/*`.
-- **Cloudflare KV** (`RATE_LIMIT_KV`) — distributed rate-limiting counters in production (with a bounded in-memory fallback for local development).
+- **Cloudflare KV** (`RATE_LIMIT_KV`) — distributed rate-limiting counters and short-lived source response caching in production (with a bounded in-memory fallback for local development).
+- **Cloudflare Queues & Cron Triggers** (`DISCOVERY_QUEUE`) — asynchronous, bounded job orchestration for nationwide authentic business discovery and lifecycle monitoring (disabled by default via `DISCOVERY_ENABLED="false"`).
 
-See **[docs/CLOUDFLARE_SETUP.md](docs/CLOUDFLARE_SETUP.md)** for complete provisioning, secrets (`BETTER_AUTH_SECRET`, OAuth/Resend/Turnstile keys), D1 migrations, and deployment instructions.
+See **[docs/CLOUDFLARE_SETUP.md](docs/CLOUDFLARE_SETUP.md)** for provisioning, secrets (`BETTER_AUTH_SECRET`, OAuth/Resend/Turnstile keys), D1 migrations, and deployment instructions, and **[docs/business-discovery/architecture-and-operations.md](docs/business-discovery/architecture-and-operations.md)** for the nationwide discovery & monitoring architecture.
 
-The admin site lives at **`https://your-site/#/admin`** (lazy-loaded only when opened).
+The admin site lives at **`https://your-site/#/admin`** (lazy-loaded only when opened), including the **Business Intelligence** workspace at **`#/admin/intelligence`**.
 
 ## 3. Data integrity & listing verification
 
 NaijaPages ships **zero synthetic, placeholder, or preloaded fake businesses or marketplace ads**. Only Nigerian geographic reference data (36 States + FCT, LGAs, geopolitical zones, business/marketplace categories, and official emergency hotlines) is bundled in `src/data/`.
 
-Every public business listing and marketplace advertisement comes from genuine member submissions stored in Cloudflare D1:
+Every public business listing comes either from genuine member submissions or from verified, legally compliant public discovery sources with traceable evidence:
 
-| Status | Meaning |
+| Status / Origin | Meaning |
 |---|---|
-| **Pending** | Newly submitted by a signed-in member with a verified email. Hidden from public search until an administrator reviews and approves it. |
-| **Approved (Unverified)** | Reviewed and published by an administrator so visitors can discover and contact the business, without a Verified badge. |
-| **Approved & Verified** | Independently checked by an administrator (for example against CAC records or ownership proof) and awarded the **Verified** badge. Only approved, verified businesses are eligible for the daily Featured spotlight. |
-| **Rejected / Removed** | Not shown publicly; the owner sees the administrator's moderation note under *My Submissions*. |
+| **Pending (Member)** | Newly submitted by a signed-in member with a verified email. Hidden from public search until an administrator reviews and approves it. |
+| **Approved (Unverified)** | Published member listing or corroborated public-source listing (`Unverified · Public source` with required source attribution such as `© OpenStreetMap contributors`). Never falsely badged as Owner Verified. |
+| **Approved & Owner Verified** | Independently checked by an administrator (for example against CAC records or ownership proof) and awarded the **Verified** badge. Only approved, verified businesses are eligible for the daily Featured spotlight. |
+| **Rejected / Removed / Archived** | Hidden from public search; archived closed listings preserve full evidence and change history for auditability and one-click restoration. |
 
-## 4. Day-to-day moderation
+## 4. Day-to-day moderation & business intelligence
 
-See **[docs/ADMIN_GUIDE.md](docs/ADMIN_GUIDE.md)** for full moderation workflows (approving/verifying businesses, moderating marketplace ads, handling reports and ownership claims, managing members/admins, and editing site settings).
-
-See **[docs/SECURITY.md](docs/SECURITY.md)** for the security architecture and production hardening checklist.
+- **[docs/ADMIN_GUIDE.md](docs/ADMIN_GUIDE.md)** — moderation workflows (approving/verifying businesses, moderating marketplace ads, handling reports and ownership claims, managing members/admins, and editing site settings).
+- **[docs/business-discovery/architecture-and-operations.md](docs/business-discovery/architecture-and-operations.md)** — operating the nationwide discovery bot, approving sources, reviewing candidates, monitoring closures, and pausing/recovering jobs.
+- **[docs/SECURITY.md](docs/SECURITY.md)** — security architecture and production hardening checklist.
 
 ## Project layout
 
 ```
-wrangler.toml              Cloudflare Workers environments (development & production) + bindings
+wrangler.toml              Cloudflare Workers environments (development & production), Queues, Cron & bindings
 config/security-headers.ts Content-Security-Policy + HTTP security headers
 worker/
-  src/                     Hono Worker API, Better Auth, D1 routes, R2 media handler, KV rate limiter
-  migrations/              Versioned Cloudflare D1 SQL migrations
+  src/                     Hono Worker API, Better Auth, D1 routes, R2 media handler, KV rate limiter, Discovery Intelligence engine
+  migrations/              Versioned Cloudflare D1 SQL migrations (0001..0005)
+docs/
+  business-discovery/      Discovery architecture, OSM ODbL notes, and documented rollback SQL
 src/
   App.tsx, Root.tsx        Public site + hash router (#/, #/marketplace, #/about, #/contact, #/admin)
   pages/                   About and Contact pages
@@ -71,6 +74,7 @@ src/
   context/                 Auth (Better Auth session & roles) and DataContext (Cloudflare D1 bootstrap)
   services/                Directory filtering/sorting and API write helpers
   lib/                     config, security validation, QR code utilities, daily-pick engine, router
-  admin/                   Admin console (loaded only when /#/admin is opened)
+  admin/                   Admin console + Business Intelligence dashboard (loaded only when /#/admin is opened)
   data/                    Nigerian States/LGAs, categories, safety tips, emergency numbers (no fake listings)
 ```
+

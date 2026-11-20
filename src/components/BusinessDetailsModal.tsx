@@ -194,6 +194,12 @@ const BusinessDetails: React.FC<BusinessDetailsModalProps & { business: Business
                   </span>
                 )}
 
+                {business.originType === 'bot_discovered' && !business.isVerified && (
+                  <span className="inline-flex items-center gap-1 text-xs font-semibold text-slate-200 bg-slate-900/70 px-2.5 py-0.5 rounded border border-white/20">
+                    Unverified · Public Directory Record
+                  </span>
+                )}
+
                 {business.yearEstablished && (
                   <span className="text-xs font-semibold text-emerald-200/90 bg-emerald-950/60 px-2 py-0.5 rounded">
                     Est. {business.yearEstablished}
@@ -400,8 +406,34 @@ const BusinessDetails: React.FC<BusinessDetailsModalProps & { business: Business
                   About This Business
                 </h3>
                 <p className="text-sm sm:text-base leading-relaxed text-slate-700 dark:text-slate-300">
-                  {business.description || `${business.name} is a verified ${business.category} establishment located in ${business.lga ? business.lga + ', ' : ''}${business.state} State, Nigeria.`}
+                  {business.description ||
+                    `${business.name} is a ${business.category} listing in ${business.lga ? business.lga + ', ' : ''}${business.state} State, Nigeria.`}
                 </p>
+
+                {business.sourceAttribution && (
+                  <div className="mt-3 p-3 rounded-lg bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-xs text-slate-600 dark:text-slate-300 flex flex-wrap items-center justify-between gap-2">
+                    <span>
+                      Data attribution:{' '}
+                      {business.sourceLicenceUrl ? (
+                        <a
+                          href={business.sourceLicenceUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="font-semibold text-emerald-700 dark:text-emerald-400 underline"
+                        >
+                          {business.sourceAttribution}
+                        </a>
+                      ) : (
+                        <span className="font-semibold">{business.sourceAttribution}</span>
+                      )}
+                    </span>
+                    {!business.isVerified && (
+                      <span className="text-slate-500 dark:text-slate-400">
+                        Not yet owner-verified — claim listing to verify details
+                      </span>
+                    )}
+                  </div>
+                )}
 
                 {business.tags && business.tags.length > 0 && (
                   <div className="flex flex-wrap gap-2 mt-3">
@@ -465,10 +497,10 @@ const BusinessDetails: React.FC<BusinessDetailsModalProps & { business: Business
                     Working Hours
                   </h4>
                   <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
-                    {business.openingHours || 'Monday – Saturday: 8:00 AM – 6:00 PM'}
+                    {business.openingHours || 'Opening hours not yet published'}
                   </p>
                   <p className="text-xs text-slate-500 dark:text-slate-400">
-                    Public holidays may vary. Contact via WhatsApp for immediate inquiries.
+                    Confirm directly with the business before visiting on public holidays.
                   </p>
                 </div>
 

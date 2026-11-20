@@ -10,7 +10,7 @@
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit && tsc -p worker/tsconfig.json --noEmit",
     "cf:typecheck": "tsc -p worker/tsconfig.json --noEmit",
-    "cf:test": "tsx --test src/lib/localFallback.test.ts src/lib/qrCode.test.ts src/services/directory.test.ts worker/src/worker.test.ts worker/src/auth.test.ts worker/src/data.test.ts worker/src/media.test.ts worker/src/discovery.test.ts worker/src/discoveryOrchestration.test.ts worker/src/osmDiscovery.test.ts scripts/migration/migration.test.ts scripts/cleanup-synthetic-d1.test.ts",
+    "cf:test": "tsx --test src/lib/localFallback.test.ts src/lib/qrCode.test.ts src/services/directory.test.ts worker/src/worker.test.ts worker/src/auth.test.ts worker/src/data.test.ts worker/src/media.test.ts worker/src/discovery.test.ts worker/src/discoveryOrchestration.test.ts worker/src/osmDiscovery.test.ts worker/src/discoveryIntelligence.test.ts scripts/migration/migration.test.ts scripts/cleanup-synthetic-d1.test.ts",
     "cf:test:osm:live": "tsx --test worker/src/osmLiveIntegration.test.ts",
     "cf:dev": "wrangler dev --env development --port 8787",
     "cf:dev:remote": "wrangler dev --env development --remote --port 8787",

@@ -105,6 +105,11 @@ export const businesses = sqliteTable('businesses', {
   isVerified: integer('is_verified', { mode: 'boolean' }).notNull().default(false),
   claimed: integer('claimed', { mode: 'boolean' }).notNull().default(false),
   claimedFromSeedId: text('claimed_from_seed_id'),
+  originType: text('origin_type').notNull().default('member_submitted'),
+  verificationTier: text('verification_tier').notNull().default('unverified'),
+  sourceAttribution: text('source_attribution'),
+  sourceLicenceUrl: text('source_licence_url'),
+  discoveredBusinessId: text('discovered_business_id'),
   moderationNote: text('moderation_note'),
   reviewedBy: text('reviewed_by').references(() => user.id, { onDelete: 'set null' }),
   reviewedAt: integer('reviewed_at'),
@@ -312,6 +317,12 @@ export const discoverySources = sqliteTable(
     permissionStatus: text('permission_status').notNull().default('pending_review'),
     enabled: integer('enabled', { mode: 'boolean' }).notNull().default(false),
     rateLimitPerMinute: integer('rate_limit_per_minute').notNull().default(30),
+    integrationType: text('integration_type').notNull().default('api'),
+    healthStatus: text('health_status').notNull().default('unknown'),
+    reliabilityScore: real('reliability_score').notNull().default(0.65),
+    consecutiveFailures: integer('consecutive_failures').notNull().default(0),
+    circuitOpenUntil: integer('circuit_open_until'),
+    updateFrequency: text('update_frequency').default('daily'),
     lastSuccessfulSync: integer('last_successful_sync'),
     lastFailedSync: integer('last_failed_sync'),
     lastError: text('last_error'),
@@ -344,6 +355,7 @@ export const discoveryJobs = sqliteTable(
     idempotencyKey: text('idempotency_key'),
     attempts: integer('attempts').notNull().default(0),
     discoveredCount: integer('discovered_count').notNull().default(0),
+    processedCount: integer('processed_count').notNull().default(0),
     acceptedCount: integer('accepted_count').notNull().default(0),
     rejectedCount: integer('rejected_count').notNull().default(0),
     duplicateCount: integer('duplicate_count').notNull().default(0),
@@ -398,6 +410,18 @@ export const discoveredBusinesses = sqliteTable(
     confidenceScore: real('confidence_score').notNull().default(0),
     verificationStatus: text('verification_status').notNull().default('unverified'),
     reviewStatus: text('review_status').notNull().default('discovered'),
+    lifecycleStatus: text('lifecycle_status').notNull().default('discovered'),
+    publishedBusinessId: text('published_business_id').references(() => businesses.id, {
+      onDelete: 'set null',
+    }),
+    corroboratingSourceCount: integer('corroborating_source_count').notNull().default(1),
+    verificationTier: text('verification_tier').notNull().default('discovered'),
+    verifiedAt: integer('verified_at'),
+    verificationNotes: text('verification_notes'),
+    attributionText: text('attribution_text'),
+    sourceLicenceUrl: text('source_licence_url'),
+    canonicalDomain: text('canonical_domain'),
+    normalizedPhone: text('normalized_phone'),
     firstSeenAt: integer('first_seen_at').notNull(),
     lastSeenAt: integer('last_seen_at').notNull(),
     lastCheckedAt: integer('last_checked_at'),
@@ -428,6 +452,14 @@ export const discoveredBusinesses = sqliteTable(
     ),
     index('idx_discovered_businesses_identity_hash').on(table.identityHash),
     index('idx_discovered_businesses_normalized_name_state').on(table.normalizedName, table.state),
+    index('idx_discovered_businesses_lifecycle').on(
+      table.lifecycleStatus,
+      table.reviewStatus,
+      table.confidenceScore,
+    ),
+    index('idx_discovered_businesses_norm_phone').on(table.normalizedPhone),
+    index('idx_discovered_businesses_domain').on(table.canonicalDomain),
+    index('idx_discovered_businesses_published_link').on(table.publishedBusinessId),
   ],
 );
 
@@ -468,6 +500,140 @@ export const businessEvidence = sqliteTable(
   ],
 );
 
+export const businessMonitoring = sqliteTable(
+  'business_monitoring',
+  {
+    id: text('id').primaryKey(),
+    discoveredBusinessId: text('discovered_business_id').references(() => discoveredBusinesses.id, {
+      onDelete: 'cascade',
+    }),
+    businessId: text('business_id').references(() => businesses.id, { onDelete: 'cascade' }),
+    healthStatus: text('health_status').notNull().default('healthy'),
+    monitoringTier: text('monitoring_tier').notNull().default('standard'),
+    checkIntervalDays: integer('check_interval_days').notNull().default(30),
+    lastVerifiedAt: integer('last_verified_at'),
+    nextCheckAt: integer('next_check_at').notNull(),
+    verificationAttempts: integer('verification_attempts').notNull().default(0),
+    failedChecks: integer('failed_checks').notNull().default(0),
+    consecutiveFailures: integer('consecutive_failures').notNull().default(0),
+    closureSignalCount: integer('closure_signal_count').notNull().default(0),
+    closureSignalsJson: text('closure_signals_json').notNull().default('[]'),
+    lastKnownStatus: text('last_known_status').notNull().default('active'),
+    monitoringNotes: text('monitoring_notes'),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (table) => [
+    index('idx_business_monitoring_due').on(table.healthStatus, table.nextCheckAt),
+  ],
+);
+
+export const businessChangeHistory = sqliteTable(
+  'business_change_history',
+  {
+    id: text('id').primaryKey(),
+    discoveredBusinessId: text('discovered_business_id').references(() => discoveredBusinesses.id, {
+      onDelete: 'cascade',
+    }),
+    businessId: text('business_id').references(() => businesses.id, { onDelete: 'cascade' }),
+    fieldChanged: text('field_changed').notNull(),
+    oldValue: text('old_value'),
+    newValue: text('new_value'),
+    changeSource: text('change_source').notNull(),
+    actorId: text('actor_id'),
+    actorEmail: text('actor_email'),
+    reason: text('reason'),
+    evidenceId: text('evidence_id').references(() => businessEvidence.id, {
+      onDelete: 'set null',
+    }),
+    appliedMode: text('applied_mode').notNull().default('automatic'),
+    createdAt: integer('created_at').notNull(),
+  },
+  (table) => [
+    index('idx_business_change_history_discovered').on(table.discoveredBusinessId, table.createdAt),
+    index('idx_business_change_history_business').on(table.businessId, table.createdAt),
+    index('idx_business_change_history_created').on(table.createdAt),
+  ],
+);
+
+export const botReviewQueue = sqliteTable(
+  'bot_review_queue',
+  {
+    id: text('id').primaryKey(),
+    discoveredBusinessId: text('discovered_business_id').references(() => discoveredBusinesses.id, {
+      onDelete: 'cascade',
+    }),
+    businessId: text('business_id').references(() => businesses.id, { onDelete: 'cascade' }),
+    reviewReason: text('review_reason').notNull(),
+    confidenceScore: real('confidence_score').notNull().default(0),
+    duplicateCandidatesJson: text('duplicate_candidates_json').notNull().default('[]'),
+    evidenceRefsJson: text('evidence_refs_json').notNull().default('[]'),
+    suggestedAction: text('suggested_action').notNull(),
+    reviewStatus: text('review_status').notNull().default('pending'),
+    adminDecision: text('admin_decision'),
+    adminNote: text('admin_note'),
+    decidedBy: text('decided_by'),
+    decidedAt: integer('decided_at'),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (table) => [
+    index('idx_bot_review_queue_status_created').on(
+      table.reviewStatus,
+      table.confidenceScore,
+      table.createdAt,
+    ),
+    index('idx_bot_review_queue_discovered').on(table.discoveredBusinessId, table.reviewStatus),
+  ],
+);
+
+export const discoveryCoverageCells = sqliteTable(
+  'discovery_coverage_cells',
+  {
+    id: text('id').primaryKey(),
+    sourceId: text('source_id')
+      .notNull()
+      .references(() => discoverySources.id, { onDelete: 'cascade' }),
+    state: text('state').notNull(),
+    lga: text('lga').notNull(),
+    category: text('category').notNull(),
+    discoveredCount: integer('discovered_count').notNull().default(0),
+    publishedCount: integer('published_count').notNull().default(0),
+    priorityScore: real('priority_score').notNull().default(100),
+    lastScannedAt: integer('last_scanned_at'),
+    nextScanAfter: integer('next_scan_after'),
+    scanCount: integer('scan_count').notNull().default(0),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (table) => [
+    uniqueIndex('idx_coverage_cells_matrix').on(
+      table.sourceId,
+      table.state,
+      table.lga,
+      table.category,
+    ),
+    index('idx_coverage_cells_priority').on(table.sourceId, table.nextScanAfter, table.priorityScore),
+  ],
+);
+
+export const discoveryBotSettings = sqliteTable('discovery_bot_settings', {
+  id: text('id').primaryKey(),
+  globalPaused: integer('global_paused', { mode: 'boolean' }).notNull().default(false),
+  discoveryPaused: integer('discovery_paused', { mode: 'boolean' }).notNull().default(false),
+  monitoringPaused: integer('monitoring_paused', { mode: 'boolean' }).notNull().default(false),
+  dailyJobLimit: integer('daily_job_limit').notNull().default(25),
+  maxBatchSize: integer('max_batch_size').notNull().default(50),
+  autoPublishMinConfidence: real('auto_publish_min_confidence').notNull().default(0.85),
+  autoPublishMinSources: integer('auto_publish_min_sources').notNull().default(2),
+  reviewMinConfidence: real('review_min_confidence').notNull().default(0.35),
+  closureConfirmThreshold: integer('closure_confirm_threshold').notNull().default(3),
+  monitoringDefaultDays: integer('monitoring_default_days').notNull().default(30),
+  aiExtractionEnabled: integer('ai_extraction_enabled', { mode: 'boolean' }).notNull().default(false),
+  aiDailyBudgetCalls: integer('ai_daily_budget_calls').notNull().default(50),
+  updatedBy: text('updated_by'),
+  updatedAt: integer('updated_at').notNull(),
+});
+
 export const schema = {
   user,
   session,
@@ -492,6 +658,11 @@ export const schema = {
   discoveryJobs,
   discoveredBusinesses,
   businessEvidence,
+  businessMonitoring,
+  businessChangeHistory,
+  botReviewQueue,
+  discoveryCoverageCells,
+  discoveryBotSettings,
 };
 
 export function createDb(d1: D1Database) {

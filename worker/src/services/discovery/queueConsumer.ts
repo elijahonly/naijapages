@@ -4,17 +4,20 @@ import type {
   DiscoveryQueueBatch,
   DiscoveryQueueMessageItem,
 } from '../../types';
+import {
+  getDiscoveryBotSettings,
+  isSourceCircuitOpen,
+  recordSourceCircuitFailure,
+  recordSourceCircuitSuccess,
+} from './botSettingsService';
 import { parseDiscoveryConfig, type DiscoveryRuntimeConfig } from './config';
+import { recordCoverageCellScan } from './coverageEngine';
 import {
   classifyDiscoveryError,
   computeRetryDelaySeconds,
   DiscoveryJobError,
 } from './errors';
-import {
-  ingestDiscoveredCandidates,
-  recordDiscoverySourceFailure,
-  recordDiscoverySourceSuccess,
-} from './ingestion';
+import { ingestDiscoveredCandidates } from './ingestion';
 import {
   claimDiscoveryJob,
   completeDiscoveryJob,
@@ -103,12 +106,26 @@ function parseJobJsonObject(raw: string | null, fieldName: string): Record<strin
 function extractBoundingBox(
   geoFilter: Record<string, unknown>,
   searchParams: Record<string, unknown>,
-): Partial<BoundingBox> | undefined {
+): BoundingBox | undefined {
   const candidate =
     (geoFilter.bbox && typeof geoFilter.bbox === 'object' ? geoFilter.bbox : null) ??
     (searchParams.bbox && typeof searchParams.bbox === 'object' ? searchParams.bbox : null) ??
     ('south' in geoFilter || 'north' in geoFilter ? geoFilter : null);
-  return candidate ? (candidate as Partial<BoundingBox>) : undefined;
+  if (!candidate || typeof candidate !== 'object') return undefined;
+  const raw = candidate as Record<string, unknown>;
+  const south = Number(raw.south);
+  const west = Number(raw.west);
+  const north = Number(raw.north);
+  const east = Number(raw.east);
+  if (
+    !Number.isFinite(south) ||
+    !Number.isFinite(west) ||
+    !Number.isFinite(north) ||
+    !Number.isFinite(east)
+  ) {
+    return undefined;
+  }
+  return { south, west, north, east };
 }
 
 /**
@@ -153,9 +170,7 @@ export const defaultDiscoveryJobHandler: DiscoveryJobHandler = async (job, ctx) 
   const searchParams = parseJobJsonObject(job.searchParametersJson, 'search_parameters_json');
   const bbox = extractBoundingBox(geoFilter, searchParams);
   const rawMaxResults =
-    searchParams.maxResults !== undefined
-      ? Number(searchParams.maxResults)
-      : ctx.config.maxBatchSize;
+    searchParams.maxResults !== undefined ? Number(searchParams.maxResults) : 50;
   const endpointUrl =
     typeof searchParams.endpointUrl === 'string' && searchParams.endpointUrl.trim()
       ? searchParams.endpointUrl.trim()
@@ -185,6 +200,22 @@ export const defaultDiscoveryJobHandler: DiscoveryJobHandler = async (job, ctx) 
     };
   }
 
+  const circuit = await isSourceCircuitOpen(ctx.env.DB, job.sourceId, ctx.now);
+  if (circuit.open) {
+    const retryAfterSeconds = Math.max(
+      60,
+      Math.ceil(((circuit.openUntil ?? ctx.now + 300_000) - ctx.now) / 1000),
+    );
+    throw new DiscoveryJobError(
+      `Source "${job.sourceId}" circuit breaker is open until ${new Date(circuit.openUntil ?? ctx.now).toISOString()}.`,
+      {
+        kind: 'transient',
+        code: 'SOURCE_CIRCUIT_OPEN',
+        retryAfterSeconds,
+      },
+    );
+  }
+
   try {
     const batchResult = await adapter.discover(validatedQuery, ctx.env, {
       fetchImpl: ctx.fetchImpl,
@@ -199,7 +230,18 @@ export const defaultDiscoveryJobHandler: DiscoveryJobHandler = async (job, ctx) 
       sourceDataTimestamp: batchResult.sourceDataTimestamp,
     });
 
-    await recordDiscoverySourceSuccess(ctx.env.DB, job.sourceId, batchResult.retrievedAt);
+    await recordSourceCircuitSuccess(ctx.env.DB, job.sourceId, batchResult.retrievedAt);
+
+    if (job.state) {
+      await recordCoverageCellScan(ctx.env.DB, {
+        sourceId: job.sourceId,
+        state: job.state,
+        lga: job.lga ?? 'All',
+        category: job.category ?? 'All',
+        discoveredDelta: ingestSummary.acceptedCount,
+        now: batchResult.retrievedAt,
+      }).catch(() => {});
+    }
 
     return {
       counters: {
@@ -217,7 +259,7 @@ export const defaultDiscoveryJobHandler: DiscoveryJobHandler = async (job, ctx) 
         `evidence=${ingestSummary.evidenceInsertedCount}, cached=${batchResult.cached}).`,
     };
   } catch (err) {
-    await recordDiscoverySourceFailure(ctx.env.DB, job.sourceId, err, ctx.now).catch(() => {});
+    await recordSourceCircuitFailure(ctx.env.DB, job.sourceId, err, ctx.now).catch(() => {});
     throw err;
   }
 };
@@ -264,8 +306,9 @@ async function processSingleMessage(
     };
   }
 
-  // 2. Respect global discovery kill-switch: re-queue cleanly with delay instead of dropping work.
-  if (!config.enabled) {
+  // 2. Respect global discovery kill-switch and admin D1 pause controls.
+  const botSettings = await getDiscoveryBotSettings(env.DB);
+  if (!config.enabled || botSettings.globalPaused || botSettings.discoveryPaused) {
     const delaySeconds = computeRetryDelaySeconds(message.attempts, {
       baseSeconds: 300,
       maxSeconds: 900,

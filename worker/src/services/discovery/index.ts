@@ -5,7 +5,17 @@ export * from './jobService';
 export * from './ingestion';
 export * from './queueConsumer';
 export * from './scheduler';
+export * from './normalization';
+export * from './deduplication';
+export * from './verification';
+export * from './coverageEngine';
+export * from './botSettingsService';
+export * from './monitoring';
+export * from './adminDiscoveryService';
 export * from './sources/types';
 export * from './sources/osmMapping';
 export * from './sources/osmSource';
+export * from './sources/websiteSource';
+export * from './sources/registryFeedSource';
 export * from './sources/registry';
+

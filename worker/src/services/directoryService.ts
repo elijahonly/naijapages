@@ -19,6 +19,7 @@ import {
   mapClaimRow,
   mapMarketplaceRow,
   mapOverrideRow,
+  mapPublishedDiscoveredBusinessRow,
   mapReviewRow,
   mapSettingsRow,
   type BusinessDbRow,
@@ -26,6 +27,7 @@ import {
   type ClaimDbRow,
   type MarketplaceDbRow,
   type OverrideDbRow,
+  type PublishedDiscoveredBusinessDbRow,
   type ReviewDbRow,
   type SettingsDbRow,
 } from './mappers';
@@ -73,13 +75,99 @@ export async function listCategories(db: D1Database, kind?: 'directory' | 'marke
   }));
 }
 
+async function fetchPublishedDiscoveredBusinesses(
+  db: D1Database,
+  params: BusinessFilterParams = {},
+  limit = 250,
+): Promise<PublishedDiscoveredBusinessDbRow[]> {
+  // Never include discovered rows if caller is filtering by ownerId, non-approved status,
+  // verifiedOnly (bot listings are not owner-verified), or minRating > 0 (bot listings have 0 fabricated ratings).
+  if (params.ownerId) return [];
+  if (params.status && params.status !== 'approved' && params.status !== 'all') return [];
+  if (params.verifiedOnly) return [];
+  if (typeof params.minRating === 'number' && params.minRating > 0) return [];
+
+  const where: string[] = [
+    "review_status = 'approved'",
+    "lifecycle_status = 'published'",
+    'published_business_id IS NULL',
+  ];
+  const binds: unknown[] = [];
+
+  if (params.category && params.category !== 'All') {
+    where.push('LOWER(COALESCE(category, \'other\')) = ?');
+    binds.push(params.category.toLowerCase());
+  }
+
+  if (params.state) {
+    const sel = params.state.trim().toLowerCase();
+    if (sel === 'fct' || sel === 'abuja') {
+      where.push("LOWER(COALESCE(state, '')) IN ('fct', 'abuja')");
+    } else if (sel === 'rivers' || sel === 'port harcourt') {
+      where.push("LOWER(COALESCE(state, '')) IN ('rivers', 'port harcourt')");
+    } else if (sel === 'oyo' || sel === 'ibadan') {
+      where.push("LOWER(COALESCE(state, '')) IN ('oyo', 'ibadan')");
+    } else {
+      where.push("LOWER(COALESCE(state, '')) = ?");
+      binds.push(sel);
+    }
+  }
+
+  if (params.lga) {
+    where.push("LOWER(COALESCE(lga, '')) = ?");
+    binds.push(params.lga.trim().toLowerCase());
+  }
+
+  if (params.zone && params.zone !== 'ALL') {
+    const zoneStates = Object.entries(STATE_ZONE_MAP)
+      .filter(([, z]) => z === params.zone)
+      .map(([st]) => st);
+    if (zoneStates.length === 0) return [];
+    where.push(`LOWER(COALESCE(state, '')) IN (${zoneStates.map(() => '?').join(', ')})`);
+    binds.push(...zoneStates);
+  }
+
+  if (params.whatsappOnly) {
+    where.push("COALESCE(phone, '') != ''");
+  }
+
+  if (params.q?.trim()) {
+    const term = `%${params.q.trim().toLowerCase()}%`;
+    where.push(
+      `(LOWER(name) LIKE ? OR LOWER(COALESCE(category, '')) LIKE ? OR LOWER(COALESCE(state, '')) LIKE ? OR LOWER(COALESCE(lga, '')) LIKE ? OR LOWER(COALESCE(address, '')) LIKE ?)`,
+    );
+    binds.push(term, term, term, term, term);
+  }
+
+  try {
+    const res = await db
+      .prepare(
+        `SELECT id, name, category, state, lga, address, phone, website, email,
+                opening_hours, latitude, longitude, source_id, source_url,
+                verification_tier, lifecycle_status, review_status,
+                attribution_text, source_licence_url, created_at, updated_at
+         FROM discovered_businesses
+         WHERE ${where.join(' AND ')}
+         ORDER BY created_at DESC
+         LIMIT ?`,
+      )
+      .bind(...binds, limit)
+      .all<PublishedDiscoveredBusinessDbRow>();
+    return res.results ?? [];
+  } catch {
+    // Graceful fallback when running against pre-0005 schemas without discovery tables/columns.
+    return [];
+  }
+}
+
 export async function getPublicBootstrap(db: D1Database) {
-  const [bizRes, adRes, ovrRes, settingsRow, categories] = await Promise.all([
+  const [bizRes, discRows, adRes, ovrRes, settingsRow, categories] = await Promise.all([
     db
       .prepare(
         `SELECT * FROM businesses WHERE status = 'approved' ORDER BY created_at DESC LIMIT 500`,
       )
       .all<BusinessDbRow>(),
+    fetchPublishedDiscoveredBusinesses(db, {}, 300),
     db
       .prepare(
         `SELECT m.*, b.is_verified AS linked_business_verified
@@ -96,7 +184,10 @@ export async function getPublicBootstrap(db: D1Database) {
   ]);
 
   return {
-    businesses: bizRes.results.map(mapBusinessRow),
+    businesses: [
+      ...bizRes.results.map(mapBusinessRow),
+      ...discRows.map(mapPublishedDiscoveredBusinessRow),
+    ],
     marketplaceItems: adRes.results.map(mapMarketplaceRow),
     overrides: ovrRes.results.map(mapOverrideRow),
     settings: mapSettingsRow(settingsRow),
@@ -210,17 +301,62 @@ export async function listBusinesses(
     .bind(...binds)
     .first<{ total: number }>();
 
-  const total = Number(countRow?.total ?? 0);
+  const memberTotal = Number(countRow?.total ?? 0);
+  const includeDiscovered =
+    effectiveStatus === 'approved' && !params.ownerId && !params.verifiedOnly;
+
+  if (!includeDiscovered) {
+    const totalPages = Math.max(1, Math.ceil(memberTotal / pageSize));
+    const offset = (page - 1) * pageSize;
+    const listRes = await db
+      .prepare(`SELECT * FROM businesses ${whereSql} ${orderSql} LIMIT ? OFFSET ?`)
+      .bind(...binds, pageSize, offset)
+      .all<BusinessDbRow>();
+
+    return {
+      items: listRes.results.map(mapBusinessRow),
+      pagination: { page, pageSize, total: memberTotal, totalPages } satisfies PaginationMeta,
+    };
+  }
+
+  const [memberRows, discRows] = await Promise.all([
+    db
+      .prepare(`SELECT * FROM businesses ${whereSql} ${orderSql} LIMIT 500`)
+      .bind(...binds)
+      .all<BusinessDbRow>(),
+    fetchPublishedDiscoveredBusinesses(db, params, 500),
+  ]);
+
+  const combined = [
+    ...memberRows.results.map(mapBusinessRow),
+    ...discRows.map(mapPublishedDiscoveredBusinessRow),
+  ];
+
+  combined.sort((a, b) => {
+    switch (params.sort) {
+      case 'newest':
+        return (b.createdAt ?? 0) - (a.createdAt ?? 0);
+      case 'reviews':
+        return b.reviewsCount - a.reviewsCount || b.rating - a.rating || (b.createdAt ?? 0) - (a.createdAt ?? 0);
+      case 'verified':
+        return Number(b.isVerified) - Number(a.isVerified) || b.rating - a.rating || (b.createdAt ?? 0) - (a.createdAt ?? 0);
+      case 'name':
+        return a.name.toLowerCase().localeCompare(b.name.toLowerCase());
+      case 'rating':
+      default: {
+        const scoreA = a.reviewsCount === 0 ? 5.1 : a.rating;
+        const scoreB = b.reviewsCount === 0 ? 5.1 : b.rating;
+        return scoreB - scoreA || (b.createdAt ?? 0) - (a.createdAt ?? 0);
+      }
+    }
+  });
+
+  const total = Math.max(memberTotal + discRows.length, combined.length);
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const offset = (page - 1) * pageSize;
 
-  const listRes = await db
-    .prepare(`SELECT * FROM businesses ${whereSql} ${orderSql} LIMIT ? OFFSET ?`)
-    .bind(...binds, pageSize, offset)
-    .all<BusinessDbRow>();
-
   return {
-    items: listRes.results.map(mapBusinessRow),
+    items: combined.slice(offset, offset + pageSize),
     pagination: { page, pageSize, total, totalPages } satisfies PaginationMeta,
   };
 }
@@ -234,15 +370,36 @@ export async function getBusinessById(
     .prepare('SELECT * FROM businesses WHERE id = ?')
     .bind(id)
     .first<BusinessDbRow>();
-  if (!row) return null;
-  if (
-    row.status !== 'approved' &&
-    viewer?.role !== 'admin' &&
-    viewer?.id !== row.owner_id
-  ) {
+  if (row) {
+    if (
+      row.status !== 'approved' &&
+      viewer?.role !== 'admin' &&
+      viewer?.id !== row.owner_id
+    ) {
+      return null;
+    }
+    return mapBusinessRow(row);
+  }
+
+  try {
+    const discRow = await db
+      .prepare(
+        `SELECT id, name, category, state, lga, address, phone, website, email,
+                opening_hours, latitude, longitude, source_id, source_url,
+                verification_tier, lifecycle_status, review_status,
+                attribution_text, source_licence_url, created_at, updated_at
+         FROM discovered_businesses
+         WHERE id = ?
+           AND review_status = 'approved'
+           AND lifecycle_status = 'published'
+           AND published_business_id IS NULL`,
+      )
+      .bind(id)
+      .first<PublishedDiscoveredBusinessDbRow>();
+    return discRow ? mapPublishedDiscoveredBusinessRow(discRow) : null;
+  } catch {
     return null;
   }
-  return mapBusinessRow(row);
 }
 
 export async function createBusiness(

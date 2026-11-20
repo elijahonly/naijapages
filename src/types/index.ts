@@ -79,6 +79,16 @@ export interface Business {
   createdAt?: number; // epoch ms
   /** Set once an admin approves an ownership claim. */
   claimed?: boolean;
+  /** Provenance & verification transparency for member vs bot-discovered listings. */
+  originType?: 'member_submitted' | 'bot_discovered' | 'owner_claimed';
+  verificationTier?:
+    | 'discovered'
+    | 'evidence_checked'
+    | 'listing_verified'
+    | 'owner_verified'
+    | 'registry_corroborated';
+  sourceAttribution?: string;
+  sourceLicenceUrl?: string;
 }
 
 export interface EmergencyContact {

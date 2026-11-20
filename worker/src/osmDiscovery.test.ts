@@ -709,7 +709,7 @@ test('End-to-end OSM queue execution stores unverified candidates, ODbL evidence
     const t1 = Date.UTC(2026, 9, 15, 12, 0, 0);
     const job1 = await createDiscoveryJob(db, {
       sourceId: OSM_SOURCE_ID,
-      jobType: 'seed',
+      jobType: 'lga_sweep',
       state: 'Lagos',
       lga: 'Eti-Osa',
       geographicFilter: { bbox: VICTORIA_ISLAND_BBOX },
